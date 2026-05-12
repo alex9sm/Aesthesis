@@ -7,7 +7,7 @@ namespace scene {
 	static renderer::MeshHandle test_mesh = renderer::INVALID_MESH;
 
 	bool init() {
-		test_mesh = renderer::load_mesh("assets/models/test.glb");
+		test_mesh = renderer::load_mesh("assets/models/monkey.gltf");
 		if (test_mesh == renderer::INVALID_MESH) {
 			logger::error("Failed to load test mesh");
 			return false;

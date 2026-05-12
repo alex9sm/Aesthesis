@@ -24,6 +24,7 @@ namespace win32 {
 		i32 mouse_x;
 		i32 mouse_y;
 		i32 scroll_delta;
+		bool cursor_visible;
 
 		u32 char_buffer[32];
 		i32 char_head;

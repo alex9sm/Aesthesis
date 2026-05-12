@@ -63,6 +63,9 @@ namespace platform {
 	bool mouse_released(MouseButton button);
 	i32 mouse_scroll();
 
+	void set_mouse_pos(i32 x, i32 y);     // client-space coords
+	void set_cursor_visible(bool visible);
+
 	bool char_available();
 	u32  char_dequeue();
 	void char_clear();

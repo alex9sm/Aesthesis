@@ -135,6 +135,19 @@ inline mat4 mat4_perspective(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
     return m;
 }
 
+// Vulkan-corrected perspective: clip-space Z is [0, 1] (vs GL's [-1, 1]).
+// Pair with a viewport that flips Y so GL-style winding/UV conventions hold.
+inline mat4 mat4_perspective_vk(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
+    f32 f = 1.0f / tanf(fov_y * 0.5f);
+    mat4 m = {};
+    m.col[0][0] = f / aspect;
+    m.col[1][1] = f;
+    m.col[2][2] = z_far / (z_near - z_far);
+    m.col[2][3] = -1.0f;
+    m.col[3][2] = (z_near * z_far) / (z_near - z_far);
+    return m;
+}
+
 inline mat4 mat4_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 z_near, f32 z_far) {
     mat4 m = {};
     m.col[0][0] = 2.0f / (right - left);

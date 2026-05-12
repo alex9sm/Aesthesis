@@ -2,20 +2,10 @@
 #include "log.hpp"
 #include "api.hpp"
 #include "scene.hpp"
+#include "camera.hpp"
 #include "math.hpp"
 
-// Vulkan-corrected perspective: maps view-space [-near, -far] to clip-space Z [0, 1].
-// pair with a viewport that flips Y so the GL-style winding/UV conventions hold.
-static mat4 mat4_perspective_vk(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
-	f32 f = 1.0f / tanf(fov_y * 0.5f);
-	mat4 m = {};
-	m.col[0][0] = f / aspect;
-	m.col[1][1] = f;
-	m.col[2][2] = z_far / (z_near - z_far);
-	m.col[2][3] = -1.0f;
-	m.col[3][2] = (z_near * z_far) / (z_near - z_far);
-	return m;
-}
+static Camera g_camera = {};
 
 static void game_init() {
 	if (!renderer::init()) {
@@ -25,13 +15,16 @@ static void game_init() {
 	if (!scene::init()) {
 		logger::error("Failed to initialize scene");
 	}
+	camera::init(&g_camera);
 	logger::info("Game initialized");
 }
 
 static void game_update(f32 dt) {
+	camera::update(&g_camera, dt);
+
 	f32 aspect = (f32)platform::window_width() / (f32)platform::window_height();
-	mat4 view = mat4_look_at({ 0.0f, 1.0f, 3.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
-	mat4 projection = mat4_perspective_vk(to_radians(60.0f), aspect, 0.1f, 100.0f);
+	mat4 view = camera::view(g_camera);
+	mat4 projection = camera::projection(g_camera, aspect);
 
 	renderer::begin_frame(view, projection);
 	scene::submit();

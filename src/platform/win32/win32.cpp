@@ -247,6 +247,8 @@ namespace platform {
 		s->time_start = now.QuadPart;
 		s->time_previous = now.QuadPart;
 
+		s->cursor_visible = true;
+
 		ShowWindow(s->hwnd, SW_SHOW);
 		UpdateWindow(s->hwnd);
 
@@ -335,6 +337,23 @@ namespace platform {
 
 	i32 mouse_scroll() {
 		return win32::get_state()->scroll_delta;
+	}
+
+	void set_mouse_pos(i32 x, i32 y) {
+		win32::State* s = win32::get_state();
+		POINT p = { x, y };
+		ClientToScreen(s->hwnd, &p);
+		SetCursorPos(p.x, p.y);
+		s->mouse_x = x;
+		s->mouse_y = y;
+	}
+
+	void set_cursor_visible(bool visible) {
+		win32::State* s = win32::get_state();
+		if (s->cursor_visible == visible) return;
+		s->cursor_visible = visible;
+		// ShowCursor maintains an internal counter; cross 0/1 only once per state change.
+		ShowCursor(visible ? TRUE : FALSE);
 	}
 
 	bool char_available() {

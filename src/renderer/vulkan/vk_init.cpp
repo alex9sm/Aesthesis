@@ -1,26 +1,14 @@
-#define VK_USE_PLATFORM_WIN32_KHR
-#include <vulkan/vulkan.h>
-
 #include "vk_init.hpp"
+#include "vk_swapchain.hpp"
 #include "platform.hpp"
 #include "log.hpp"
 #include "memory.hpp"
 
 namespace vk {
 
-	struct Context {
-		VkInstance instance;
-		VkSurfaceKHR surface;
-		VkPhysicalDevice physical_device;
-		VkDevice device;
-
-		u32 graphics_queue_index;
-		u32 present_queue_index;
-		VkQueue graphics_queue;
-		VkQueue present_queue;
-	};
-
 	static Context ctx = {};
+
+	Context& context() { return ctx; }
 
 	// --- instance ---
 
@@ -197,13 +185,17 @@ namespace vk {
 		if (!create_surface()) return false;
 		if (!pick_physical_device()) return false;
 		if (!create_device()) return false;
+		if (!create_swapchain()) return false;
 
 		logger::info("Vulkan initialized");
 		return true;
 	}
 
 	void shutdown() {
-		if (ctx.device) vkDestroyDevice(ctx.device, nullptr);
+		if (ctx.device) {
+			destroy_swapchain();
+			vkDestroyDevice(ctx.device, nullptr);
+		}
 		if (ctx.surface) vkDestroySurfaceKHR(ctx.instance, ctx.surface, nullptr);
 		if (ctx.instance) vkDestroyInstance(ctx.instance, nullptr);
 

@@ -2,6 +2,8 @@
 #include "vk_swapchain.hpp"
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
+#include "vk_mesh.hpp"
+#include "vk_gbuffer.hpp"
 #include "platform.hpp"
 #include "log.hpp"
 #include "memory.hpp"
@@ -157,15 +159,23 @@ namespace vk {
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 		};
 
-		VkPhysicalDeviceFeatures features = {};
+		// enable Vulkan 1.3 dynamic rendering (no VkRenderPass / VkFramebuffer objects)
+		VkPhysicalDeviceVulkan13Features features13 = {};
+		features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+		features13.dynamicRendering = VK_TRUE;
+
+		VkPhysicalDeviceFeatures2 features2 = {};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.pNext = &features13;
 
 		VkDeviceCreateInfo create_info = {};
 		create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+		create_info.pNext = &features2;
 		create_info.queueCreateInfoCount = queue_count;
 		create_info.pQueueCreateInfos = queue_infos;
 		create_info.enabledExtensionCount = 1;
 		create_info.ppEnabledExtensionNames = device_extensions;
-		create_info.pEnabledFeatures = &features;
+		create_info.pEnabledFeatures = nullptr;  // using pNext->VkPhysicalDeviceFeatures2 instead
 
 		VkResult result = vkCreateDevice(ctx.physical_device, &create_info, nullptr, &ctx.device);
 		if (result != VK_SUCCESS) {
@@ -190,6 +200,8 @@ namespace vk {
 		if (!init_memory()) return false;
 		if (!create_swapchain()) return false;
 		if (!init_frames()) return false;
+		if (!init_meshes()) return false;
+		if (!init_gbuffer()) return false;
 
 		logger::info("Vulkan initialized");
 		return true;
@@ -197,6 +209,9 @@ namespace vk {
 
 	void shutdown() {
 		if (ctx.device) {
+			vkDeviceWaitIdle(ctx.device);
+			shutdown_gbuffer();
+			shutdown_meshes();
 			shutdown_frames();
 			destroy_swapchain();
 			shutdown_memory();

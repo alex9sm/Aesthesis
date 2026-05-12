@@ -111,30 +111,6 @@ namespace vk {
 		memory::set(frames, 0, sizeof(frames));
 	}
 
-	// --- helpers ---
-
-	static void transition_image(VkCommandBuffer cmd, VkImage image,
-		VkImageLayout from, VkImageLayout to,
-		VkAccessFlags src_access, VkAccessFlags dst_access,
-		VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
-	{
-		VkImageMemoryBarrier barrier = {};
-		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.oldLayout = from;
-		barrier.newLayout = to;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = image;
-		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		barrier.subresourceRange.baseMipLevel = 0;
-		barrier.subresourceRange.levelCount = 1;
-		barrier.subresourceRange.baseArrayLayer = 0;
-		barrier.subresourceRange.layerCount = 1;
-		barrier.srcAccessMask = src_access;
-		barrier.dstAccessMask = dst_access;
-		vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-	}
-
 	// --- per-frame ---
 
 	bool begin_frame() {
@@ -165,12 +141,6 @@ namespace vk {
 		begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		vkBeginCommandBuffer(f.cmd_buffer, &begin);
 
-		// swapchain image: UNDEFINED -> COLOR_ATTACHMENT for rendering
-		transition_image(f.cmd_buffer, sc.images[current_image],
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-
 		return true;
 	}
 
@@ -178,12 +148,6 @@ namespace vk {
 		Context& c = context();
 		Swapchain& sc = swapchain();
 		PerFrame& f = frames[current_frame];
-
-		// swapchain image: COLOR_ATTACHMENT -> PRESENT
-		transition_image(f.cmd_buffer, sc.images[current_image],
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
 		vkEndCommandBuffer(f.cmd_buffer);
 

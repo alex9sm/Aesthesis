@@ -1,0 +1,32 @@
+# Visual Studio 2022 Specific
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Build Folders
+x64/
+x86/
+Aesthesis/
+
+# Intended for all build configurations (Debug/Release)
+[Debug]/
+[Release]/
+
+# Visual Studio hidden folders and cache
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Compiled Object files and Intermediate files
+*.obj
+*.tlog
+*.lastbuildstate
+*.idb
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib

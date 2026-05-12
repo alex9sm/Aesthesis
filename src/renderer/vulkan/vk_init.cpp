@@ -1,5 +1,7 @@
 #include "vk_init.hpp"
 #include "vk_swapchain.hpp"
+#include "vk_memory.hpp"
+#include "vk_frame.hpp"
 #include "platform.hpp"
 #include "log.hpp"
 #include "memory.hpp"
@@ -185,7 +187,9 @@ namespace vk {
 		if (!create_surface()) return false;
 		if (!pick_physical_device()) return false;
 		if (!create_device()) return false;
+		if (!init_memory()) return false;
 		if (!create_swapchain()) return false;
+		if (!init_frames()) return false;
 
 		logger::info("Vulkan initialized");
 		return true;
@@ -193,7 +197,9 @@ namespace vk {
 
 	void shutdown() {
 		if (ctx.device) {
+			shutdown_frames();
 			destroy_swapchain();
+			shutdown_memory();
 			vkDestroyDevice(ctx.device, nullptr);
 		}
 		if (ctx.surface) vkDestroySurfaceKHR(ctx.instance, ctx.surface, nullptr);

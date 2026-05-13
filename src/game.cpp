@@ -22,6 +22,10 @@ static void game_init() {
 static void game_update(f32 dt) {
 	camera::update(&g_camera, dt);
 
+	if (platform::key_pressed(platform::KEY_GRAVE)) {
+		renderer::cycle_debug_mode();
+	}
+
 	f32 aspect = (f32)platform::window_width() / (f32)platform::window_height();
 	mat4 view = camera::view(g_camera);
 	mat4 projection = camera::projection(g_camera, aspect);

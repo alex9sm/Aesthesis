@@ -18,5 +18,6 @@ namespace vk {
 
 	VkCommandBuffer current_cmd();
 	u32 current_swapchain_image();
+	u32 current_frame_index();
 
 }

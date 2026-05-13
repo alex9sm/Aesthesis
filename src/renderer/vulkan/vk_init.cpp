@@ -3,7 +3,11 @@
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
+#include "vk_targets.hpp"
+#include "vk_globals.hpp"
 #include "vk_gbuffer.hpp"
+#include "vk_lighting.hpp"
+#include "vk_debug.hpp"
 #include "platform.hpp"
 #include "log.hpp"
 #include "memory.hpp"
@@ -201,7 +205,13 @@ namespace vk {
 		if (!create_swapchain()) return false;
 		if (!init_frames()) return false;
 		if (!init_meshes()) return false;
+		if (!init_targets(swapchain().extent)) return false;
+		if (!init_globals()) return false;
 		if (!init_gbuffer()) return false;
+		if (!init_lighting()) return false;
+		if (!init_debug()) return false;
+		lighting_refresh_descriptors();
+		debug_refresh_descriptors();
 
 		logger::info("Vulkan initialized");
 		return true;
@@ -210,7 +220,11 @@ namespace vk {
 	void shutdown() {
 		if (ctx.device) {
 			vkDeviceWaitIdle(ctx.device);
+			shutdown_debug();
+			shutdown_lighting();
 			shutdown_gbuffer();
+			shutdown_globals();
+			shutdown_targets();
 			shutdown_meshes();
 			shutdown_frames();
 			destroy_swapchain();

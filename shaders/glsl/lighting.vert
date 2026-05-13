@@ -1,0 +1,14 @@
+#version 450
+
+layout(location = 0) out vec2 v_uv;
+
+// fullscreen triangle: covers NDC [-1,1] with a single oversized tri
+// vertex 0: (-1,-1)  vertex 1: (-1, 3)  vertex 2: ( 3,-1)
+void main() {
+    vec2 pos = vec2(
+        (gl_VertexIndex == 2) ? 3.0 : -1.0,
+        (gl_VertexIndex == 1) ? 3.0 : -1.0
+    );
+    v_uv = pos * 0.5 + 0.5;
+    gl_Position = vec4(pos, 0.0, 1.0);
+}

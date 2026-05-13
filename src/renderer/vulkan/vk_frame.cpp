@@ -24,6 +24,7 @@ namespace vk {
 
 	VkCommandBuffer current_cmd() { return frames[current_frame].cmd_buffer; }
 	u32 current_swapchain_image() { return current_image; }
+	u32 current_frame_index() { return current_frame; }
 
 	// --- creation ---
 

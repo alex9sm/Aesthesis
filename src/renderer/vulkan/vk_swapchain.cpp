@@ -1,5 +1,8 @@
 #include "vk_swapchain.hpp"
 #include "vk_init.hpp"
+#include "vk_targets.hpp"
+#include "vk_lighting.hpp"
+#include "vk_debug.hpp"
 #include "platform.hpp"
 #include "log.hpp"
 #include "memory.hpp"
@@ -190,7 +193,14 @@ namespace vk {
 		Context& c = context();
 		vkDeviceWaitIdle(c.device);
 		destroy_swapchain();
-		return create_swapchain();
+		if (!create_swapchain()) return false;
+		// resize render targets so debug/composite passes match the new swapchain extent
+		if (sc.extent.width > 0 && sc.extent.height > 0) {
+			if (!resize_targets(sc.extent)) return false;
+			lighting_refresh_descriptors();
+			debug_refresh_descriptors();
+		}
+		return true;
 	}
 
 }

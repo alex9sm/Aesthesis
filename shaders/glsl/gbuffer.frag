@@ -10,8 +10,7 @@ layout(location = 2) out vec2 out_material;  // RG8 UNORM (metallic, roughness)
 void main() {
     out_albedo = v_color;
     vec3 n = normalize(v_normal);
-    // store world-space normal mapped to [0,1] (RGBA16F has headroom but
-    // keep convention consistent with later passes)
+    // world-space normal encoded into [0,1]
     out_normal = vec4(n * 0.5 + 0.5, 0.0);
     // default material: non-metal, mid roughness
     out_material = vec2(0.0, 0.5);

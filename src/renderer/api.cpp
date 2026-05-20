@@ -7,14 +7,19 @@
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
 #include "vk_globals.hpp"
+#include "vk_instance.hpp"
 #include "vk_swapchain.hpp"
 #include "log.hpp"
 
 namespace renderer {
 
-	static constexpr u32 MAX_DRAWS_PER_FRAME = 1024;
+	struct PendingDraw {
+		MeshHandle mesh;
+		mat4 model;
+		vec4 color;
+	};
 
-	static vk::GBufferDraw draw_queue[MAX_DRAWS_PER_FRAME];
+	static PendingDraw draw_queue[vk::MAX_DRAWS_PER_FRAME];
 	static u32 draw_count = 0;
 
 	static mat4 frame_view = {};
@@ -87,7 +92,7 @@ namespace renderer {
 
 	void submit_mesh(MeshHandle mesh, const mat4& model, vec4 color) {
 		if (!frame_active) return;
-		if (draw_count >= MAX_DRAWS_PER_FRAME) return;
+		if (draw_count >= vk::MAX_DRAWS_PER_FRAME) return;
 		draw_queue[draw_count++] = { mesh, model, color };
 	}
 
@@ -97,7 +102,21 @@ namespace renderer {
 		VkCommandBuffer cmd = vk::current_cmd();
 		u32 image_index = vk::current_swapchain_image();
 
-		vk::execute_gbuffer_pass(cmd, draw_queue, draw_count);
+		// write per-draw data into the per-frame instance SSBO, and collect
+		// the parallel mesh-handle list for the gbuffer pass.
+		vk::reset_instances();
+		MeshHandle meshes[vk::MAX_DRAWS_PER_FRAME];
+		for (u32 i = 0; i < draw_count; i++) {
+			vk::InstanceData id = {};
+			id.model = draw_queue[i].model;
+			id.normal_matrix = vk::compute_normal_matrix(draw_queue[i].model);
+			id.tint = draw_queue[i].color;
+			id.material_id = 0;
+			vk::push_instance(id);
+			meshes[i] = draw_queue[i].mesh;
+		}
+
+		vk::execute_gbuffer_pass(cmd, meshes, draw_count);
 		vk::execute_lighting_pass(cmd);
 		vk::execute_debug_pass(cmd, image_index, g_debug_mode);
 

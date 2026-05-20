@@ -9,16 +9,13 @@
 
 namespace vk {
 
-	struct GBufferDraw {
-		MeshHandle mesh;
-		mat4 model;
-		vec4 color;
-	};
-
 	bool init_gbuffer();
 	void shutdown_gbuffer();
 
+	// `meshes` is parallel to the instance SSBO: meshes[i] is drawn with
+	// firstInstance = i. caller is responsible for writing instance data
+	// to the SSBO before this is recorded.
 	void execute_gbuffer_pass(VkCommandBuffer cmd,
-		const GBufferDraw* draws, u32 draw_count);
+		const MeshHandle* meshes, u32 draw_count);
 
 }

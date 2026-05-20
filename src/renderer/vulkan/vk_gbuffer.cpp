@@ -14,12 +14,6 @@
 
 namespace vk {
 
-	struct PushConstants {
-		mat4 model;
-		mat4 normal_matrix;  // top-left 3x3 used; padded to mat4 for std140 alignment
-		vec4 color;
-	};
-
 	static VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 	static VkPipeline pipeline = VK_NULL_HANDLE;
 
@@ -115,20 +109,14 @@ namespace vk {
 		dyn.dynamicStateCount = 2;
 		dyn.pDynamicStates = dyn_states;
 
-		// pipeline layout with push constants
-		VkPushConstantRange push_range = {};
-		push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-		push_range.offset = 0;
-		push_range.size = sizeof(PushConstants);
-
 		VkDescriptorSetLayout set_layouts[] = { global_set_layout() };
 
 		VkPipelineLayoutCreateInfo layout_ci = {};
 		layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		layout_ci.setLayoutCount = 1;
 		layout_ci.pSetLayouts = set_layouts;
-		layout_ci.pushConstantRangeCount = 1;
-		layout_ci.pPushConstantRanges = &push_range;
+		layout_ci.pushConstantRangeCount = 0;
+		layout_ci.pPushConstantRanges = nullptr;
 
 		if (vkCreatePipelineLayout(c.device, &layout_ci, nullptr, &pipeline_layout) != VK_SUCCESS) {
 			logger::fatal("Failed to create pipeline layout");
@@ -190,39 +178,8 @@ namespace vk {
 		pipeline_layout = VK_NULL_HANDLE;
 	}
 
-	// build a "normal matrix" from the upper-left 3x3 of model, packed into a mat4
-	// for std140 layout simplicity. shader uses mat3(normal_matrix).
-	// (column-major: m.col[c][r] = column c, row r)
-	static mat4 build_normal_matrix(const mat4& model) {
-		// take the upper-left 3x3 of model, transpose-inverse it
-		f32 a00 = model.col[0][0], a01 = model.col[0][1], a02 = model.col[0][2];
-		f32 a10 = model.col[1][0], a11 = model.col[1][1], a12 = model.col[1][2];
-		f32 a20 = model.col[2][0], a21 = model.col[2][1], a22 = model.col[2][2];
-
-		f32 c00 =  (a11 * a22 - a12 * a21);
-		f32 c01 = -(a10 * a22 - a12 * a20);
-		f32 c02 =  (a10 * a21 - a11 * a20);
-		f32 c10 = -(a01 * a22 - a02 * a21);
-		f32 c11 =  (a00 * a22 - a02 * a20);
-		f32 c12 = -(a00 * a21 - a01 * a20);
-		f32 c20 =  (a01 * a12 - a02 * a11);
-		f32 c21 = -(a00 * a12 - a02 * a10);
-		f32 c22 =  (a00 * a11 - a01 * a10);
-
-		f32 det = a00 * c00 + a01 * c01 + a02 * c02;
-		f32 inv_det = (det != 0.0f) ? (1.0f / det) : 0.0f;
-
-		// normal_matrix = transpose(inverse(M3)) = cofactor / det (no transpose needed)
-		mat4 n = {};
-		n.col[0][0] = c00 * inv_det; n.col[0][1] = c01 * inv_det; n.col[0][2] = c02 * inv_det;
-		n.col[1][0] = c10 * inv_det; n.col[1][1] = c11 * inv_det; n.col[1][2] = c12 * inv_det;
-		n.col[2][0] = c20 * inv_det; n.col[2][1] = c21 * inv_det; n.col[2][2] = c22 * inv_det;
-		n.col[3][3] = 1.0f;
-		return n;
-	}
-
 	void execute_gbuffer_pass(VkCommandBuffer cmd,
-		const GBufferDraw* draws, u32 draw_count)
+		const MeshHandle* meshes, u32 draw_count)
 	{
 		Targets& t = targets();
 
@@ -314,21 +271,14 @@ namespace vk {
 			0, 1, &global_set, 0, nullptr);
 
 		for (u32 i = 0; i < draw_count; i++) {
-			const MeshGPU* m = get_mesh(draws[i].mesh);
+			const MeshGPU* m = get_mesh(meshes[i]);
 			if (!m) continue;
-
-			PushConstants pc;
-			pc.model = draws[i].model;
-			pc.normal_matrix = build_normal_matrix(draws[i].model);
-			pc.color = draws[i].color;
-			vkCmdPushConstants(cmd, pipeline_layout,
-				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-				0, sizeof(pc), &pc);
 
 			VkDeviceSize offset = 0;
 			vkCmdBindVertexBuffers(cmd, 0, 1, &m->vertex_buffer, &offset);
 			vkCmdBindIndexBuffer(cmd, m->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-			vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
+			// firstInstance = i selects instances[i] from the SSBO via gl_InstanceIndex
+			vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, i);
 		}
 
 		vkCmdEndRendering(cmd);

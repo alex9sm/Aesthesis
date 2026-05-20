@@ -25,5 +25,6 @@ namespace vk {
 
 	VkDescriptorSetLayout global_set_layout();
 	VkDescriptorSet       current_global_set();
+	VkDescriptorSet       global_set_for_frame(u32 frame_index);
 
 }

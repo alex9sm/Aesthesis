@@ -20,20 +20,26 @@ namespace vk {
 
 	VkDescriptorSetLayout global_set_layout() { return set_layout; }
 	VkDescriptorSet current_global_set() { return sets[current_frame_index()]; }
+	VkDescriptorSet global_set_for_frame(u32 frame_index) { return sets[frame_index]; }
 
 	static bool create_layout() {
 		Context& c = context();
 
-		VkDescriptorSetLayoutBinding b = {};
-		b.binding = 0;
-		b.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		b.descriptorCount = 1;
-		b.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		VkDescriptorSetLayoutBinding bindings[2] = {};
+		bindings[0].binding = 0;
+		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[0].descriptorCount = 1;
+		bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+		bindings[1].binding = 1;
+		bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		bindings[1].descriptorCount = 1;
+		bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
 		VkDescriptorSetLayoutCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		ci.bindingCount = 1;
-		ci.pBindings = &b;
+		ci.bindingCount = 2;
+		ci.pBindings = bindings;
 
 		if (vkCreateDescriptorSetLayout(c.device, &ci, nullptr, &set_layout) != VK_SUCCESS) {
 			logger::fatal("Failed to create global descriptor set layout");
@@ -45,15 +51,17 @@ namespace vk {
 	static bool create_pool() {
 		Context& c = context();
 
-		VkDescriptorPoolSize size = {};
-		size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		size.descriptorCount = FRAMES_IN_FLIGHT;
+		VkDescriptorPoolSize sizes[2] = {};
+		sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		sizes[0].descriptorCount = FRAMES_IN_FLIGHT;
+		sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		sizes[1].descriptorCount = FRAMES_IN_FLIGHT;
 
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		ci.maxSets = FRAMES_IN_FLIGHT;
-		ci.poolSizeCount = 1;
-		ci.pPoolSizes = &size;
+		ci.poolSizeCount = 2;
+		ci.pPoolSizes = sizes;
 
 		if (vkCreateDescriptorPool(c.device, &ci, nullptr, &pool) != VK_SUCCESS) {
 			logger::fatal("Failed to create global descriptor pool");

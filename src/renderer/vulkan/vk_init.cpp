@@ -6,6 +6,7 @@
 #include "vk_targets.hpp"
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
+#include "vk_texture.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
@@ -169,9 +170,17 @@ namespace vk {
 		features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 		features13.dynamicRendering = VK_TRUE;
 
+		// Vulkan 1.2 descriptor indexing for the bindless texture array
+		VkPhysicalDeviceVulkan12Features features12 = {};
+		features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+		features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+		features12.runtimeDescriptorArray = VK_TRUE;
+		features12.descriptorBindingPartiallyBound = VK_TRUE;
+		features12.pNext = &features13;
+
 		VkPhysicalDeviceFeatures2 features2 = {};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-		features2.pNext = &features13;
+		features2.pNext = &features12;
 
 		VkDeviceCreateInfo create_info = {};
 		create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -209,6 +218,7 @@ namespace vk {
 		if (!init_targets(swapchain().extent)) return false;
 		if (!init_globals()) return false;
 		if (!init_instances()) return false;
+		if (!init_textures()) return false;
 		if (!init_gbuffer()) return false;
 		if (!init_lighting()) return false;
 		if (!init_debug()) return false;
@@ -225,6 +235,7 @@ namespace vk {
 			shutdown_debug();
 			shutdown_lighting();
 			shutdown_gbuffer();
+			shutdown_textures();
 			shutdown_instances();
 			shutdown_globals();
 			shutdown_targets();

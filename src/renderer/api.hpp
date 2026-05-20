@@ -8,6 +8,14 @@ namespace renderer {
 	using MeshHandle = u32;
 	static constexpr MeshHandle INVALID_MESH = 0;
 
+	using TextureHandle = u32;
+	static constexpr TextureHandle INVALID_TEXTURE = (TextureHandle)~0u;
+
+	// engine-provided reserved texture slots, always populated
+	static constexpr TextureHandle DEFAULT_ALBEDO = 0;  // 1x1 white
+	static constexpr TextureHandle DEFAULT_NORMAL = 1;  // 1x1 flat-normal
+	static constexpr TextureHandle DEFAULT_ORM    = 2;  // 1x1 ORM neutral
+
 	enum DebugMode : u32 {
 		DEBUG_FINAL    = 0,  // Reinhard(scene_hdr) + gamma 2.2
 		DEBUG_ALBEDO   = 1,
@@ -24,6 +32,9 @@ namespace renderer {
 	// resource management
 	MeshHandle load_mesh(const char* path);
 	void unload_mesh(MeshHandle handle);
+
+	TextureHandle load_texture(const char* path);
+	void unload_texture(TextureHandle handle);
 
 	// frame
 	void begin_frame(const mat4& view, const mat4& projection);

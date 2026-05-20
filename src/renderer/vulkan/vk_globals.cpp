@@ -2,6 +2,7 @@
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
+#include "vk_texture.hpp"  // for MAX_TEXTURES (binding 3 array size)
 #include "log.hpp"
 #include "memory.hpp"
 
@@ -25,7 +26,10 @@ namespace vk {
 	static bool create_layout() {
 		Context& c = context();
 
-		VkDescriptorSetLayoutBinding bindings[2] = {};
+		// binding 0: Globals UBO
+		// binding 1: Instance SSBO
+		// binding 3: bindless textures[MAX_TEXTURES] (binding 2 reserved for Material SSBO in phase C)
+		VkDescriptorSetLayoutBinding bindings[3] = {};
 		bindings[0].binding = 0;
 		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		bindings[0].descriptorCount = 1;
@@ -36,9 +40,28 @@ namespace vk {
 		bindings[1].descriptorCount = 1;
 		bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
+		bindings[2].binding = 3;
+		bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		bindings[2].descriptorCount = MAX_TEXTURES;
+		bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+		// only binding 3 (the texture array) is partially bound; the other
+		// two are always populated.
+		VkDescriptorBindingFlags binding_flags[3] = {
+			0,
+			0,
+			VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+		};
+
+		VkDescriptorSetLayoutBindingFlagsCreateInfo flags_ci = {};
+		flags_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+		flags_ci.bindingCount = 3;
+		flags_ci.pBindingFlags = binding_flags;
+
 		VkDescriptorSetLayoutCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		ci.bindingCount = 2;
+		ci.pNext = &flags_ci;
+		ci.bindingCount = 3;
 		ci.pBindings = bindings;
 
 		if (vkCreateDescriptorSetLayout(c.device, &ci, nullptr, &set_layout) != VK_SUCCESS) {
@@ -51,16 +74,18 @@ namespace vk {
 	static bool create_pool() {
 		Context& c = context();
 
-		VkDescriptorPoolSize sizes[2] = {};
+		VkDescriptorPoolSize sizes[3] = {};
 		sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		sizes[0].descriptorCount = FRAMES_IN_FLIGHT;
 		sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		sizes[1].descriptorCount = FRAMES_IN_FLIGHT;
+		sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		sizes[2].descriptorCount = MAX_TEXTURES * FRAMES_IN_FLIGHT;
 
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		ci.maxSets = FRAMES_IN_FLIGHT;
-		ci.poolSizeCount = 2;
+		ci.poolSizeCount = 3;
 		ci.pPoolSizes = sizes;
 
 		if (vkCreateDescriptorPool(c.device, &ci, nullptr, &pool) != VK_SUCCESS) {

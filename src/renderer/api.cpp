@@ -8,6 +8,7 @@
 #include "vk_debug.hpp"
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
+#include "vk_texture.hpp"
 #include "vk_swapchain.hpp"
 #include "log.hpp"
 
@@ -53,6 +54,14 @@ namespace renderer {
 
 	void unload_mesh(MeshHandle handle) {
 		vk::destroy_mesh(handle);
+	}
+
+	TextureHandle load_texture(const char* path) {
+		return vk::load_texture(path);
+	}
+
+	void unload_texture(TextureHandle handle) {
+		vk::unload_texture(handle);
 	}
 
 	void begin_frame(const mat4& view, const mat4& projection) {

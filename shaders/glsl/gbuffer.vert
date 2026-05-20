@@ -29,11 +29,13 @@ layout(set = 0, binding = 1, std430) readonly buffer Instances {
 } inst;
 
 layout(location = 0) out vec3 v_normal;
-layout(location = 1) out vec4 v_color;
+layout(location = 1) out vec4 v_tint;
+layout(location = 2) flat out uint v_material_id;
 
 void main() {
     InstanceData id = inst.instances[gl_InstanceIndex];
     gl_Position = g.proj * g.view * id.model * vec4(in_position, 1.0);
     v_normal = mat3(id.normal_matrix) * in_normal;
-    v_color = id.tint;
+    v_tint = id.tint;
+    v_material_id = id.material_id;
 }

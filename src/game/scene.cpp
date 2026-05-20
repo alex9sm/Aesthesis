@@ -4,27 +4,27 @@
 
 namespace scene {
 
-	static renderer::MeshHandle test_mesh = renderer::INVALID_MESH;
+	static renderer::ModelHandle test_model = renderer::INVALID_MODEL;
 
 	bool init() {
-		test_mesh = renderer::load_mesh("assets/models/damagedhelmet/DamagedHelmet.gltf");
-		if (test_mesh == renderer::INVALID_MESH) {
-			logger::error("Failed to load test mesh");
+		test_model = renderer::load_model("assets/models/damagedhelmet/DamagedHelmet.gltf");
+		if (test_model == renderer::INVALID_MODEL) {
+			logger::error("Failed to load test model");
 			return false;
 		}
 		return true;
 	}
 
 	void shutdown() {
-		if (test_mesh != renderer::INVALID_MESH) {
-			renderer::unload_mesh(test_mesh);
-			test_mesh = renderer::INVALID_MESH;
+		if (test_model != renderer::INVALID_MODEL) {
+			renderer::unload_model(test_model);
+			test_model = renderer::INVALID_MODEL;
 		}
 	}
 
 	void submit() {
-		if (test_mesh == renderer::INVALID_MESH) return;
-		renderer::submit_mesh(test_mesh, mat4_identity(), { 0.8f, 0.4f, 0.2f, 1.0f });
+		if (test_model == renderer::INVALID_MODEL) return;
+		renderer::submit_model(test_model, mat4_identity());
 	}
 
 }

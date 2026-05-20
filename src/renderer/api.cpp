@@ -9,15 +9,18 @@
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
 #include "vk_texture.hpp"
+#include "vk_material.hpp"
 #include "vk_swapchain.hpp"
+#include "memory.hpp"
 #include "log.hpp"
 
 namespace renderer {
 
 	struct PendingDraw {
-		MeshHandle mesh;
-		mat4 model;
-		vec4 color;
+		MeshHandle     mesh;
+		MaterialHandle material;
+		mat4           model;
+		vec4           tint;
 	};
 
 	static PendingDraw draw_queue[vk::MAX_DRAWS_PER_FRAME];
@@ -29,19 +32,55 @@ namespace renderer {
 
 	static u32 g_debug_mode = DEBUG_FINAL;
 
+	// --- model slot table ---
+
+	static constexpr u32 MAX_MODELS = 64;
+
+	struct ModelNode {
+		MeshHandle     mesh;
+		MaterialHandle material;
+		mat4           local_transform;
+	};
+
+	struct ModelInternal {
+		ModelNode* nodes;
+		u32        node_count;
+		bool       in_use;
+	};
+
+	static ModelInternal models[MAX_MODELS] = {};
+
+	static ModelHandle alloc_model_slot() {
+		for (u32 i = 0; i < MAX_MODELS; i++) {
+			if (!models[i].in_use) return i;
+		}
+		return INVALID_MODEL;
+	}
+
+	// --- init / shutdown ---
+
 	bool init() {
 		if (!vk::init()) {
 			logger::fatal("Failed to initialize Vulkan");
 			return false;
 		}
+		memory::set(models, 0, sizeof(models));
 		logger::info("Renderer initialized");
 		return true;
 	}
 
 	void shutdown() {
+		for (u32 i = 0; i < MAX_MODELS; i++) {
+			if (models[i].in_use && models[i].nodes) {
+				memory::free(models[i].nodes);
+			}
+		}
+		memory::set(models, 0, sizeof(models));
 		vk::shutdown();
 		logger::info("Renderer shutdown");
 	}
+
+	// --- meshes ---
 
 	MeshHandle load_mesh(const char* path) {
 		MeshData data = {};
@@ -56,6 +95,8 @@ namespace renderer {
 		vk::destroy_mesh(handle);
 	}
 
+	// --- textures ---
+
 	TextureHandle load_texture(const char* path) {
 		return vk::load_texture(path);
 	}
@@ -63,6 +104,131 @@ namespace renderer {
 	void unload_texture(TextureHandle handle) {
 		vk::unload_texture(handle);
 	}
+
+	// --- materials ---
+
+	MaterialHandle create_material(const MaterialDesc& desc) {
+		vk::MaterialDescGPU g = {};
+		g.albedo_idx = (desc.albedo == INVALID_TEXTURE) ? DEFAULT_ALBEDO : desc.albedo;
+		g.normal_idx = (desc.normal == INVALID_TEXTURE) ? DEFAULT_NORMAL : desc.normal;
+		g.orm_idx    = (desc.orm    == INVALID_TEXTURE) ? DEFAULT_ORM    : desc.orm;
+		g.base_color_factor = desc.base_color_factor;
+		g.metallic_factor   = desc.metallic_factor;
+		g.roughness_factor  = desc.roughness_factor;
+		return vk::create_material(g);
+	}
+
+	void unload_material(MaterialHandle handle) {
+		vk::unload_material(handle);
+	}
+
+	MaterialHandle default_material() {
+		return DEFAULT_MATERIAL_HANDLE;
+	}
+
+	// --- models ---
+
+	ModelHandle load_model(const char* path) {
+		GltfModel gm = {};
+		if (!load_gltf_model(path, &gm)) {
+			return INVALID_MODEL;
+		}
+
+		ModelHandle slot = alloc_model_slot();
+		if (slot == INVALID_MODEL) {
+			logger::error("Out of model slots");
+			free_gltf_model(&gm);
+			return INVALID_MODEL;
+		}
+
+		// 1. textures (in order; index i in gm becomes texture_handles[i])
+		TextureHandle* texture_handles = nullptr;
+		if (gm.texture_count > 0) {
+			texture_handles = (TextureHandle*)memory::malloc(sizeof(TextureHandle) * gm.texture_count);
+			for (u32 i = 0; i < gm.texture_count; i++) {
+				texture_handles[i] = load_texture(gm.textures[i].path);
+				if (texture_handles[i] == INVALID_TEXTURE) {
+					// fall back to default albedo; doesn't matter which since the
+					// material will quote it via whichever slot it referenced.
+					texture_handles[i] = DEFAULT_ALBEDO;
+				}
+			}
+		}
+
+		// 2. materials
+		MaterialHandle* material_handles = nullptr;
+		if (gm.material_count > 0) {
+			material_handles = (MaterialHandle*)memory::malloc(sizeof(MaterialHandle) * gm.material_count);
+			for (u32 i = 0; i < gm.material_count; i++) {
+				const GltfMaterial& src = gm.materials[i];
+				MaterialDesc desc = {};
+				desc.albedo = (src.albedo_index == (u32)~0u) ? DEFAULT_ALBEDO : texture_handles[src.albedo_index];
+				desc.normal = (src.normal_index == (u32)~0u) ? DEFAULT_NORMAL : texture_handles[src.normal_index];
+				desc.orm    = (src.orm_index    == (u32)~0u) ? DEFAULT_ORM    : texture_handles[src.orm_index];
+				desc.base_color_factor = src.base_color_factor;
+				desc.metallic_factor   = src.metallic_factor;
+				desc.roughness_factor  = src.roughness_factor;
+				material_handles[i] = create_material(desc);
+				if (material_handles[i] == INVALID_MATERIAL) {
+					material_handles[i] = DEFAULT_MATERIAL_HANDLE;
+				}
+			}
+		}
+
+		// 3. meshes (per primitive)
+		MeshHandle* prim_handles = nullptr;
+		if (gm.primitive_count > 0) {
+			prim_handles = (MeshHandle*)memory::malloc(sizeof(MeshHandle) * gm.primitive_count);
+			for (u32 i = 0; i < gm.primitive_count; i++) {
+				if (gm.primitives[i].mesh.vertex_count == 0) {
+					prim_handles[i] = INVALID_MESH;
+					continue;
+				}
+				prim_handles[i] = vk::create_mesh(gm.primitives[i].mesh);
+			}
+		}
+
+		// 4. nodes — collapse to {mesh, material, transform} triples
+		ModelInternal& mi = models[slot];
+		mi.in_use = true;
+		mi.node_count = 0;
+		mi.nodes = (gm.node_count > 0)
+			? (ModelNode*)memory::malloc(sizeof(ModelNode) * gm.node_count)
+			: nullptr;
+
+		for (u32 i = 0; i < gm.node_count; i++) {
+			const GltfNode& gn = gm.nodes[i];
+			if (gn.primitive_index >= gm.primitive_count) continue;
+			MeshHandle mh = prim_handles ? prim_handles[gn.primitive_index] : INVALID_MESH;
+			if (mh == INVALID_MESH) continue;
+
+			MaterialHandle matp = DEFAULT_MATERIAL_HANDLE;
+			if (gn.material_index != (u32)~0u && material_handles) {
+				matp = material_handles[gn.material_index];
+			}
+
+			mi.nodes[mi.node_count++] = { mh, matp, gn.world_transform };
+		}
+
+		if (texture_handles)  memory::free(texture_handles);
+		if (material_handles) memory::free(material_handles);
+		if (prim_handles)     memory::free(prim_handles);
+
+		free_gltf_model(&gm);
+		return slot;
+	}
+
+	void unload_model(ModelHandle handle) {
+		if (handle >= MAX_MODELS) return;
+		ModelInternal& mi = models[handle];
+		if (!mi.in_use) return;
+		if (mi.nodes) memory::free(mi.nodes);
+		mi.nodes = nullptr;
+		mi.node_count = 0;
+		mi.in_use = false;
+	}
+
+	// --- frame ---
 
 	void begin_frame(const mat4& view, const mat4& projection) {
 		frame_view = view;
@@ -99,10 +265,25 @@ namespace renderer {
 		}
 	}
 
-	void submit_mesh(MeshHandle mesh, const mat4& model, vec4 color) {
+	void submit_mesh(MeshHandle mesh, MaterialHandle material,
+		const mat4& model, vec4 tint)
+	{
 		if (!frame_active) return;
 		if (draw_count >= vk::MAX_DRAWS_PER_FRAME) return;
-		draw_queue[draw_count++] = { mesh, model, color };
+		MaterialHandle m = (material == INVALID_MATERIAL) ? DEFAULT_MATERIAL_HANDLE : material;
+		draw_queue[draw_count++] = { mesh, m, model, tint };
+	}
+
+	void submit_model(ModelHandle model, const mat4& transform, vec4 tint) {
+		if (!frame_active) return;
+		if (model >= MAX_MODELS) return;
+		const ModelInternal& mi = models[model];
+		if (!mi.in_use) return;
+
+		for (u32 i = 0; i < mi.node_count; i++) {
+			const ModelNode& n = mi.nodes[i];
+			submit_mesh(n.mesh, n.material, transform * n.local_transform, tint);
+		}
 	}
 
 	void end_frame() {
@@ -119,8 +300,8 @@ namespace renderer {
 			vk::InstanceData id = {};
 			id.model = draw_queue[i].model;
 			id.normal_matrix = vk::compute_normal_matrix(draw_queue[i].model);
-			id.tint = draw_queue[i].color;
-			id.material_id = 0;
+			id.tint = draw_queue[i].tint;
+			id.material_id = draw_queue[i].material;
 			vk::push_instance(id);
 			meshes[i] = draw_queue[i].mesh;
 		}

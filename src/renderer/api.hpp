@@ -11,6 +11,14 @@ namespace renderer {
 	using TextureHandle = u32;
 	static constexpr TextureHandle INVALID_TEXTURE = (TextureHandle)~0u;
 
+	using MaterialHandle = u32;
+	static constexpr MaterialHandle INVALID_MATERIAL = (MaterialHandle)~0u;
+	// slot 0 is the engine-provided default material (flat grey, roughness=1, metallic=0).
+	static constexpr MaterialHandle DEFAULT_MATERIAL_HANDLE = 0;
+
+	using ModelHandle = u32;
+	static constexpr ModelHandle INVALID_MODEL = (ModelHandle)~0u;
+
 	// engine-provided reserved texture slots, always populated
 	static constexpr TextureHandle DEFAULT_ALBEDO = 0;  // 1x1 white
 	static constexpr TextureHandle DEFAULT_NORMAL = 1;  // 1x1 flat-normal
@@ -26,6 +34,17 @@ namespace renderer {
 		DEBUG_COUNT    = 6
 	};
 
+	// developer-facing material description. unset texture handles default to
+	// the engine reserved slots (white/flat-normal/ORM-neutral).
+	struct MaterialDesc {
+		TextureHandle albedo            = DEFAULT_ALBEDO;
+		TextureHandle normal            = DEFAULT_NORMAL;
+		TextureHandle orm               = DEFAULT_ORM;
+		vec4          base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
+		f32           metallic_factor   = 1.0f;
+		f32           roughness_factor  = 1.0f;
+	};
+
 	bool init();
 	void shutdown();
 
@@ -36,9 +55,19 @@ namespace renderer {
 	TextureHandle load_texture(const char* path);
 	void unload_texture(TextureHandle handle);
 
+	MaterialHandle create_material(const MaterialDesc& desc);
+	void unload_material(MaterialHandle handle);
+	MaterialHandle default_material();
+
+	ModelHandle load_model(const char* path);
+	void unload_model(ModelHandle handle);
+
 	// frame
 	void begin_frame(const mat4& view, const mat4& projection);
-	void submit_mesh(MeshHandle mesh, const mat4& model, vec4 color);
+	void submit_mesh(MeshHandle mesh, MaterialHandle material,
+		const mat4& model, vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
+	void submit_model(ModelHandle model, const mat4& transform,
+		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
 	void end_frame();
 
 	// debug

@@ -40,13 +40,13 @@ namespace vk {
 		stages[1].module = fs;
 		stages[1].pName = "main";
 
-		// vertex input: pos at location 0, normal at location 1
+		// vertex input: pos / normal / tangent / uv
 		VkVertexInputBindingDescription binding = {};
 		binding.binding = 0;
 		binding.stride = sizeof(renderer::Vertex);
 		binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-		VkVertexInputAttributeDescription attrs[2] = {};
+		VkVertexInputAttributeDescription attrs[4] = {};
 		attrs[0].location = 0;
 		attrs[0].binding = 0;
 		attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -55,12 +55,20 @@ namespace vk {
 		attrs[1].binding = 0;
 		attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 		attrs[1].offset = (u32)offsetof(renderer::Vertex, normal);
+		attrs[2].location = 2;
+		attrs[2].binding = 0;
+		attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+		attrs[2].offset = (u32)offsetof(renderer::Vertex, tangent);
+		attrs[3].location = 3;
+		attrs[3].binding = 0;
+		attrs[3].format = VK_FORMAT_R32G32_SFLOAT;
+		attrs[3].offset = (u32)offsetof(renderer::Vertex, uv);
 
 		VkPipelineVertexInputStateCreateInfo vi = {};
 		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vi.vertexBindingDescriptionCount = 1;
 		vi.pVertexBindingDescriptions = &binding;
-		vi.vertexAttributeDescriptionCount = 2;
+		vi.vertexAttributeDescriptionCount = 4;
 		vi.pVertexAttributeDescriptions = attrs;
 
 		VkPipelineInputAssemblyStateCreateInfo ia = {};
@@ -221,7 +229,9 @@ namespace vk {
 		color_attachments[1].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		color_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		color_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		color_attachments[1].clearValue.color = { { 0.5f, 0.5f, 1.0f, 0.0f } };
+		// RG16F octahedral; sky pixels are gated by depth in the lighting pass
+		// so the cleared value is never read.
+		color_attachments[1].clearValue.color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
 
 		color_attachments[2].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		color_attachments[2].imageView = t.material.view;

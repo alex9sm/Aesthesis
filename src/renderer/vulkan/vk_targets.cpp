@@ -76,7 +76,7 @@ namespace vk {
 			| VK_IMAGE_USAGE_SAMPLED_BIT;
 
 		if (!create_image(&t.albedo,    VK_FORMAT_R8G8B8A8_UNORM,      extent, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
-		if (!create_image(&t.normal,    VK_FORMAT_R16G16B16A16_SFLOAT, extent, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
+		if (!create_image(&t.normal,    VK_FORMAT_R16G16_SFLOAT,       extent, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
 		if (!create_image(&t.material,  VK_FORMAT_R8G8_UNORM,          extent, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
 		if (!create_image(&t.depth,     VK_FORMAT_D32_SFLOAT,          extent, depth_usage, VK_IMAGE_ASPECT_DEPTH_BIT)) return false;
 		if (!create_image(&t.scene_hdr, VK_FORMAT_R16G16B16A16_SFLOAT, extent, hdr_usage,   VK_IMAGE_ASPECT_COLOR_BIT)) return false;

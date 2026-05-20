@@ -1,5 +1,7 @@
 #version 450
 
+#include "include/octahedral.glsl"
+
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
@@ -34,8 +36,10 @@ void main() {
     } else if (pc.mode == 1u) {
         col = texture(t_albedo, v_uv).rgb;
     } else if (pc.mode == 2u) {
-        // normal stored as n*0.5+0.5 already in [0,1]
-        col = texture(t_normal, v_uv).rgb;
+        // normal stored octahedral-encoded in RG16F
+        vec2 enc = texture(t_normal, v_uv).rg;
+        vec3 n = decode_octahedral(enc);
+        col = n * 0.5 + 0.5;
     } else if (pc.mode == 3u) {
         vec2 m = texture(t_material, v_uv).rg;
         col = vec3(m, 0.0);

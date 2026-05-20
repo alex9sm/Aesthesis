@@ -8,6 +8,8 @@ namespace renderer {
 	struct Vertex {
 		vec3 position;
 		vec3 normal;
+		vec4 tangent;   // .xyz tangent, .w bitangent sign (glTF convention)
+		vec2 uv;
 	};
 
 	struct MeshData {

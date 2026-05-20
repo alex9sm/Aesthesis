@@ -23,10 +23,24 @@ namespace renderer {
 		return nullptr;
 	}
 
+	// find an attribute with a specific set index (e.g. TEXCOORD_0 has index 0).
+	static const cgltf_attribute* find_attribute_indexed(const cgltf_primitive* prim,
+		cgltf_attribute_type type, int set_index)
+	{
+		for (cgltf_size i = 0; i < prim->attributes_count; i++) {
+			if (prim->attributes[i].type == type && prim->attributes[i].index == set_index) {
+				return &prim->attributes[i];
+			}
+		}
+		return nullptr;
+	}
+
 	// unpack one cgltf_primitive into MeshData. returns false if no positions.
 	static bool primitive_to_mesh(const cgltf_primitive* prim, MeshData* out) {
 		const cgltf_attribute* pos_attr = find_attribute(prim, cgltf_attribute_type_position);
 		const cgltf_attribute* nrm_attr = find_attribute(prim, cgltf_attribute_type_normal);
+		const cgltf_attribute* tan_attr = find_attribute(prim, cgltf_attribute_type_tangent);
+		const cgltf_attribute* uv_attr  = find_attribute_indexed(prim, cgltf_attribute_type_texcoord, 0);
 
 		if (!pos_attr) return false;
 
@@ -51,6 +65,34 @@ namespace renderer {
 				vertices[i].normal = { 0.0f, 1.0f, 0.0f };
 			}
 		}
+
+		// TANGENT (vec4: xyz tangent, w bitangent sign). Missing tangents fall
+		// back to {1,0,0,1} — normal mapping will be wrong, but the engine
+		// still renders without crashing.
+		if (tan_attr && tan_attr->data->count == vertex_count) {
+			for (u32 i = 0; i < vertex_count; i++) {
+				f32 t[4] = {};
+				cgltf_accessor_read_float(tan_attr->data, i, t, 4);
+				vertices[i].tangent = { t[0], t[1], t[2], t[3] };
+			}
+		} else {
+			if (!tan_attr) {
+				logger::error("glTF primitive missing TANGENT attribute — normal mapping will be incorrect");
+			}
+			for (u32 i = 0; i < vertex_count; i++) {
+				vertices[i].tangent = { 1.0f, 0.0f, 0.0f, 1.0f };
+			}
+		}
+
+		// TEXCOORD_0
+		if (uv_attr && uv_attr->data->count == vertex_count) {
+			for (u32 i = 0; i < vertex_count; i++) {
+				f32 uv[2] = {};
+				cgltf_accessor_read_float(uv_attr->data, i, uv, 2);
+				vertices[i].uv = { uv[0], uv[1] };
+			}
+		}
+		// else: uv remains {0,0} from the initial memory::set above.
 
 		u32 index_count = 0;
 		u32* indices = nullptr;

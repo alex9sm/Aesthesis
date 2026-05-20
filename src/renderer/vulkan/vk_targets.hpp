@@ -18,7 +18,7 @@ namespace vk {
 
 	struct Targets {
 		RenderImage albedo;     // RGBA8_UNORM
-		RenderImage normal;     // RGBA16F
+		RenderImage normal;     // RG16F (octahedral-encoded world normal)
 		RenderImage material;   // RG8_UNORM
 		RenderImage depth;      // D32_SFLOAT
 		RenderImage scene_hdr;  // RGBA16F   (lighting output)

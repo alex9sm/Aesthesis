@@ -62,8 +62,10 @@ void main() {
 
     vec3 N = decode_octahedral(enc_n);
 
-    // reconstruct world-space position from depth
-    vec4 clip      = vec4(v_uv * 2.0 - 1.0, d, 1.0);
+    // reconstruct world-space position from depth.
+    // gbuffer is rendered with a Y-flipped viewport, so the NDC.y that produced
+    // this pixel is (1 - 2*v_uv.y), not (2*v_uv.y - 1).
+    vec4 clip      = vec4(v_uv.x * 2.0 - 1.0, 1.0 - v_uv.y * 2.0, d, 1.0);
     vec4 view_pos  = g.inv_proj * clip;
     view_pos      /= view_pos.w;
     vec3 P         = (g.inv_view * view_pos).xyz;

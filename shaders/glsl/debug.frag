@@ -44,9 +44,10 @@ void main() {
         vec2 m = texture(t_material, v_uv).rg;
         col = vec3(m, 0.0);
     } else if (pc.mode == 4u) {
-        // depth linearized via inv_proj, normalized against the camera's [near, far]
+        // depth linearized via inv_proj, normalized against the camera's [near, far].
+        // gbuffer used a Y-flipped viewport, so NDC.y = 1 - 2*v_uv.y.
         float d = texture(t_depth, v_uv).r;
-        vec4 ndc = vec4(v_uv * 2.0 - 1.0, d, 1.0);
+        vec4 ndc = vec4(v_uv.x * 2.0 - 1.0, 1.0 - v_uv.y * 2.0, d, 1.0);
         vec4 view_pos = g.inv_proj * ndc;
         view_pos /= view_pos.w;
         float linear_z = -view_pos.z;

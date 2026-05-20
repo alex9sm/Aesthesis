@@ -9,13 +9,22 @@
 
 namespace vk {
 
+	// one batched draw: a run of consecutive instance-SSBO entries that all
+	// reference the same mesh. emitted as one vkCmdDrawIndexed call.
+	struct DrawBatch {
+		MeshHandle mesh;
+		u32        first_instance;
+		u32        instance_count;
+	};
+
 	bool init_gbuffer();
 	void shutdown_gbuffer();
 
-	// `meshes` is parallel to the instance SSBO: meshes[i] is drawn with
-	// firstInstance = i. caller is responsible for writing instance data
-	// to the SSBO before this is recorded.
+	// `batches` describes the post-sort run-length encoding of the draw queue.
+	// caller must have written the corresponding instance-SSBO entries in
+	// the order implied by the batches (i.e. firstInstance + i indexes a
+	// matching InstanceData slot).
 	void execute_gbuffer_pass(VkCommandBuffer cmd,
-		const MeshHandle* meshes, u32 draw_count);
+		const DrawBatch* batches, u32 batch_count);
 
 }

@@ -292,21 +292,64 @@ namespace renderer {
 		VkCommandBuffer cmd = vk::current_cmd();
 		u32 image_index = vk::current_swapchain_image();
 
-		// write per-draw data into the per-frame instance SSBO, and collect
-		// the parallel mesh-handle list for the gbuffer pass.
-		vk::reset_instances();
-		MeshHandle meshes[vk::MAX_DRAWS_PER_FRAME];
+		// --- mesh-first stable sort ---
+		//
+		// bindless materials make per-instance material switches free, so the
+		// optimal grouping is by mesh: collapse runs of identical mesh handles
+		// into a single vkCmdDrawIndexed with instanceCount=N. counting sort
+		// over the bounded MeshHandle range is O(n + MAX_MESHES) and stable.
+		static PendingDraw sorted[vk::MAX_DRAWS_PER_FRAME];
+		u32 bucket[vk::MAX_MESHES] = {};
+
 		for (u32 i = 0; i < draw_count; i++) {
-			vk::InstanceData id = {};
-			id.model = draw_queue[i].model;
-			id.normal_matrix = vk::compute_normal_matrix(draw_queue[i].model);
-			id.tint = draw_queue[i].tint;
-			id.material_id = draw_queue[i].material;
-			vk::push_instance(id);
-			meshes[i] = draw_queue[i].mesh;
+			MeshHandle m = draw_queue[i].mesh;
+			if (m == INVALID_MESH || m >= vk::MAX_MESHES) continue;
+			bucket[m]++;
+		}
+		// prefix-sum the bucket counts into write offsets.
+		u32 running = 0;
+		for (u32 m = 0; m < vk::MAX_MESHES; m++) {
+			u32 c = bucket[m];
+			bucket[m] = running;
+			running += c;
+		}
+		// scatter, preserving original order within each bucket (stable).
+		u32 sorted_count = 0;
+		for (u32 i = 0; i < draw_count; i++) {
+			MeshHandle m = draw_queue[i].mesh;
+			if (m == INVALID_MESH || m >= vk::MAX_MESHES) continue;
+			sorted[bucket[m]++] = draw_queue[i];
+			sorted_count++;
 		}
 
-		vk::execute_gbuffer_pass(cmd, meshes, draw_count);
+		// --- write SSBO + build batches ---
+
+		vk::reset_instances();
+		static vk::DrawBatch batches[vk::MAX_DRAWS_PER_FRAME];
+		u32 batch_count = 0;
+
+		u32 run_start = 0;
+		while (run_start < sorted_count) {
+			MeshHandle run_mesh = sorted[run_start].mesh;
+			u32 run_end = run_start + 1;
+			while (run_end < sorted_count && sorted[run_end].mesh == run_mesh) {
+				run_end++;
+			}
+
+			for (u32 i = run_start; i < run_end; i++) {
+				vk::InstanceData id = {};
+				id.model = sorted[i].model;
+				id.normal_matrix = vk::compute_normal_matrix(sorted[i].model);
+				id.tint = sorted[i].tint;
+				id.material_id = sorted[i].material;
+				vk::push_instance(id);
+			}
+
+			batches[batch_count++] = { run_mesh, run_start, run_end - run_start };
+			run_start = run_end;
+		}
+
+		vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);
 		vk::execute_debug_pass(cmd, image_index, g_debug_mode);
 

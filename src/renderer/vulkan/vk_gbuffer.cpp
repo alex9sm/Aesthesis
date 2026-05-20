@@ -179,7 +179,7 @@ namespace vk {
 	}
 
 	void execute_gbuffer_pass(VkCommandBuffer cmd,
-		const MeshHandle* meshes, u32 draw_count)
+		const DrawBatch* batches, u32 batch_count)
 	{
 		Targets& t = targets();
 
@@ -270,15 +270,17 @@ namespace vk {
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout,
 			0, 1, &global_set, 0, nullptr);
 
-		for (u32 i = 0; i < draw_count; i++) {
-			const MeshGPU* m = get_mesh(meshes[i]);
+		for (u32 b = 0; b < batch_count; b++) {
+			const DrawBatch& batch = batches[b];
+			const MeshGPU* m = get_mesh(batch.mesh);
 			if (!m) continue;
 
 			VkDeviceSize offset = 0;
 			vkCmdBindVertexBuffers(cmd, 0, 1, &m->vertex_buffer, &offset);
 			vkCmdBindIndexBuffer(cmd, m->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-			// firstInstance = i selects instances[i] from the SSBO via gl_InstanceIndex
-			vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, i);
+			// each instance within the batch picks its InstanceData via
+			// gl_InstanceIndex = firstInstance + instance_within_draw.
+			vkCmdDrawIndexed(cmd, m->index_count, batch.instance_count, 0, 0, batch.first_instance);
 		}
 
 		vkCmdEndRendering(cmd);

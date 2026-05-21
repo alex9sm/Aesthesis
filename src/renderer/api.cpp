@@ -32,6 +32,12 @@ namespace renderer {
 
 	static u32 g_debug_mode = DEBUG_FINAL;
 
+	// persistent sun state. defaults provide a sane fallback if the scene
+	// never calls set_sun (white light, straight down, low intensity).
+	static vec3 g_sun_dir       = { 0.0f, 1.0f, 0.0f };
+	static vec3 g_sun_color     = { 1.0f, 1.0f, 1.0f };
+	static f32  g_sun_intensity = 1.0f;
+
 	// --- model slot table ---
 
 	static constexpr u32 MAX_MODELS = 64;
@@ -228,6 +234,15 @@ namespace renderer {
 		mi.in_use = false;
 	}
 
+	// --- lighting ---
+
+	void set_sun(vec3 direction, vec3 color, f32 intensity) {
+		f32 len_sq = direction.x * direction.x + direction.y * direction.y + direction.z * direction.z;
+		g_sun_dir = (len_sq > 0.0f) ? normalize(direction) : vec3{ 0.0f, 1.0f, 0.0f };
+		g_sun_color = color;
+		g_sun_intensity = intensity;
+	}
+
 	// --- frame ---
 
 	void begin_frame(const mat4& view, const mat4& projection) {
@@ -244,19 +259,15 @@ namespace renderer {
 			g.proj = projection;
 			g.inv_view = mat4_inverse(view);
 			g.inv_proj = mat4_inverse(projection);
-			// extract z_near / z_far from the Vulkan-corrected projection matrix
-			// (see mat4_perspective_vk: col[2][2] = -f/(f-n), col[3][2] = -n*f/(f-n))
-			f32 A = projection.col[2][2];
-			f32 B = projection.col[3][2];
-			f32 z_near = (A != 0.0f) ? B / A : 0.1f;
-			f32 z_far  = ((1.0f + A) != 0.0f) ? (A * z_near) / (1.0f + A) : 1000.0f;
+
+			f32 z_near, z_far;
+			mat4_extract_perspective_vk(projection, &z_near, &z_far);
 
 			// camera world position is the translation column of inv_view; pack z_near in .w
-			g.cam_pos = { g.inv_view.col[3][0], g.inv_view.col[3][1], g.inv_view.col[3][2], z_near };
-			// direction TO light (light is up and slightly forward/right of origin); pack z_far in .w
-			vec3 sd = normalize(vec3{ -0.5f, 1.0f, -0.3f });
-			g.sun_dir   = { sd.x, sd.y, sd.z, z_far };
-			g.sun_color = { 1.0f, 1.0f, 1.0f, 3.0f };
+			g.cam_pos   = { g.inv_view.col[3][0], g.inv_view.col[3][1], g.inv_view.col[3][2], z_near };
+			g.sun_dir   = { g_sun_dir.x, g_sun_dir.y, g_sun_dir.z, z_far };
+			g.sun_color = { g_sun_color.x, g_sun_color.y, g_sun_color.z, g_sun_intensity };
+
 			f32 w = (f32)sc.extent.width;
 			f32 h = (f32)sc.extent.height;
 			g.viewport_size = { w, h, w > 0 ? 1.0f / w : 0.0f, h > 0 ? 1.0f / h : 0.0f };

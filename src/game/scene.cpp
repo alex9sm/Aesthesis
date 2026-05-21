@@ -19,6 +19,9 @@ namespace scene {
 			logger::error("Failed to load test model");
 			return false;
 		}
+
+		// directional sun: up and slightly forward/right of the origin.
+		renderer::set_sun({ -0.5f, 1.0f, -0.3f }, { 1.0f, 1.0f, 1.0f }, 3.0f);
 		return true;
 	}
 

@@ -148,6 +148,17 @@ inline mat4 mat4_perspective_vk(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
     return m;
 }
 
+// Inverse of mat4_perspective_vk: recover near/far from a Vulkan-corrected
+// projection matrix. col[2][2] = -f/(f-n), col[3][2] = -n*f/(f-n).
+inline void mat4_extract_perspective_vk(const mat4& p, f32* out_near, f32* out_far) {
+    f32 A = p.col[2][2];
+    f32 B = p.col[3][2];
+    f32 n = (A != 0.0f) ? B / A : 0.1f;
+    f32 f = ((1.0f + A) != 0.0f) ? (A * n) / (1.0f + A) : 1000.0f;
+    if (out_near) *out_near = n;
+    if (out_far)  *out_far  = f;
+}
+
 inline mat4 mat4_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 z_near, f32 z_far) {
     mat4 m = {};
     m.col[0][0] = 2.0f / (right - left);

@@ -62,6 +62,9 @@ namespace renderer {
 	ModelHandle load_model(const char* path);
 	void unload_model(ModelHandle handle);
 
+	// lighting (persistent state; set whenever the scene changes it)
+	void set_sun(vec3 direction, vec3 color, f32 intensity);
+
 	// frame
 	void begin_frame(const mat4& view, const mat4& projection);
 	void submit_mesh(MeshHandle mesh, MaterialHandle material,

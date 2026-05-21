@@ -23,10 +23,7 @@ namespace scene {
 	}
 
 	void shutdown() {
-		if (test_model != renderer::INVALID_MODEL) {
-			renderer::unload_model(test_model);
-			test_model = renderer::INVALID_MODEL;
-		}
+		renderer::unload_model(test_model);
 	}
 
 	void submit() {

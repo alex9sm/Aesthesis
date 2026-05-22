@@ -5,16 +5,11 @@
 
 #include "cubemap.hpp"
 #include "string.hpp"
+#include "memory.hpp"
 #include "log.hpp"
 #include "stb_image.h"
 
 namespace renderer {
-
-	static const char* FACE_NAMES[6] = {
-		"px", "nx",
-		"py", "ny",
-		"pz", "nz",
-	};
 
 	bool load_cubemap_faces(const char* name, CubemapFaces* out) {
 		if (!name || !out) return false;
@@ -23,42 +18,50 @@ namespace renderer {
 		out->size = 0;
 
 		char path[512];
-		i32 ref_w = 0, ref_h = 0;
+		str::format(path, sizeof(path), "assets/textures/global/%s.png", name);
 
-		for (u32 i = 0; i < 6; i++) {
-			str::format(path, sizeof(path),
-				"assets/textures/global/%s/%s.png", name, FACE_NAMES[i]);
+		int w = 0, h = 0, ch = 0;
+		stbi_uc* data = stbi_load(path, &w, &h, &ch, 4);
+		if (!data) {
+			logger::error("Cubemap missing: %s", path);
+			return false;
+		}
 
-			int w = 0, h = 0, ch = 0;
-			stbi_uc* data = stbi_load(path, &w, &h, &ch, 4);
-			if (!data) {
-				logger::error("Cubemap face missing: %s", path);
-				free_cubemap_faces(out);
-				return false;
-			}
+		// Expected layout: 6 faces horizontally → width must be 6 * height.
+		if (h <= 0 || w != h * 6) {
+			logger::error("Cubemap %s has wrong dimensions %dx%d (expected 6N x N)",
+				path, w, h);
+			stbi_image_free(data);
+			return false;
+		}
 
-			if (i == 0) {
-				if (w != h) {
-					logger::error("Cubemap face %s is not square (%dx%d)", path, w, h);
-					stbi_image_free(data);
-					free_cubemap_faces(out);
-					return false;
-				}
-				ref_w = w;
-				ref_h = h;
-			}
-			else if (w != ref_w || h != ref_h) {
-				logger::error("Cubemap face size mismatch: %s is %dx%d, expected %dx%d",
-					path, w, h, ref_w, ref_h);
+		u32 size = (u32)h;
+		u32 face_bytes = size * size * 4;
+		u32 src_stride = (u32)w * 4;        // bytes per row in the source strip
+		u32 dst_stride = size * 4;          // bytes per row in a face buffer
+
+		// Copy each square out of the strip into its own contiguous RGBA8 buffer.
+		// vk_cubemap's staging path expects each face's pixels packed tightly.
+		for (u32 f = 0; f < 6; f++) {
+			u8* face_buf = (u8*)memory::malloc(face_bytes);
+			if (!face_buf) {
+				logger::error("Cubemap %s: failed to allocate face buffer", path);
 				stbi_image_free(data);
 				free_cubemap_faces(out);
 				return false;
 			}
 
-			out->pixels[i] = (u8*)data;
+			u32 col_offset = f * size * 4;  // byte offset into each row for this face
+			for (u32 row = 0; row < size; row++) {
+				memory::copy(face_buf + row * dst_stride,
+					data + row * src_stride + col_offset,
+					dst_stride);
+			}
+			out->pixels[f] = face_buf;
 		}
 
-		out->size = (u32)ref_w;
+		stbi_image_free(data);
+		out->size = size;
 		return true;
 	}
 
@@ -66,7 +69,7 @@ namespace renderer {
 		if (!faces) return;
 		for (u32 i = 0; i < 6; i++) {
 			if (faces->pixels[i]) {
-				stbi_image_free(faces->pixels[i]);
+				memory::free(faces->pixels[i]);
 				faces->pixels[i] = nullptr;
 			}
 		}

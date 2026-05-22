@@ -65,7 +65,9 @@ namespace renderer {
 	ModelHandle load_model(const char* path);
 	void unload_model(ModelHandle handle);
 
-	// loads 6 PNG faces from assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png.
+	// loads a single PNG at assets/textures/global/<name>.png containing the
+	// 6 cube faces as a horizontal strip (left-to-right: +X, -X, +Y, -Y, +Z, -Z).
+	// The image must be 6N wide × N tall.
 	// `intensity` is a per-cubemap LDR brightness multiplier applied during the
 	// IBL prefilter bake (Phase F4); ignored at load time, 1.0 = neutral.
 	// load_cubemap also bakes diffuse irradiance for use as an environment.

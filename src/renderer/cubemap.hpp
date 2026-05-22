@@ -5,19 +5,21 @@
 namespace renderer {
 
 	// Six RGBA8 face buffers in Vulkan cube layer order:
-	//   0 = +X (px), 1 = -X (nx),
-	//   2 = +Y (py), 3 = -Y (ny),
-	//   4 = +Z (pz), 5 = -Z (nz)
+	//   0 = +X, 1 = -X,
+	//   2 = +Y, 3 = -Y,
+	//   4 = +Z, 5 = -Z
 	// All faces share the same width = height = size.
 	struct CubemapFaces {
 		u8* pixels[6];
 		u32 size;
 	};
 
-	// Loads 6 PNG faces from `assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png`.
-	// On success, `out->pixels[i]` are stb_image-allocated RGBA8 buffers and the
-	// caller must release them with `free_cubemap_faces`. Returns false if any
-	// face is missing, sizes mismatch, or faces aren't square.
+	// Loads a single PNG at `assets/textures/global/<name>.png` containing the
+	// six cubemap faces as a horizontal strip, arranged left-to-right in the
+	// order +X, -X, +Y, -Y, +Z, -Z. The image must be 6N wide × N tall (each
+	// face is N×N). On success, `out->pixels[i]` are engine-allocated RGBA8
+	// face buffers and the caller must release them with `free_cubemap_faces`.
+	// Returns false on missing file or wrong aspect ratio.
 	bool load_cubemap_faces(const char* name, CubemapFaces* out);
 	void free_cubemap_faces(CubemapFaces* faces);
 

@@ -287,6 +287,8 @@ namespace vk {
 
 		for (u32 i = 0; i < MAX_CUBEMAPS; i++) {
 			CubemapSlot& s = cubemaps[i];
+			if (s.prefilter_view)   vkDestroyImageView(c.device, s.prefilter_view, nullptr);
+			if (s.prefilter_image)  vmaDestroyImage(a, s.prefilter_image, s.prefilter_alloc);
 			if (s.irradiance_view)  vkDestroyImageView(c.device, s.irradiance_view, nullptr);
 			if (s.irradiance_image) vmaDestroyImage(a, s.irradiance_image, s.irradiance_alloc);
 			if (s.source_view)      vkDestroyImageView(c.device, s.source_view, nullptr);
@@ -325,10 +327,15 @@ namespace vk {
 
 		renderer::free_cubemap_faces(&faces);
 
-		// IBL bake: irradiance now, prefilter once Phase F4 lands. Source is
-		// already SHADER_READ_ONLY_OPTIMAL coming out of upload_cubemap.
+		// IBL bake: irradiance + prefilter. Source is already
+		// SHADER_READ_ONLY_OPTIMAL coming out of upload_cubemap.
 		if (!bake_irradiance(slot)) {
 			logger::error("IBL irradiance bake failed for cubemap '%s'", name);
+			unload_cubemap(slot);
+			return INVALID_CUBEMAP;
+		}
+		if (!bake_prefilter(slot)) {
+			logger::error("IBL prefilter bake failed for cubemap '%s'", name);
 			unload_cubemap(slot);
 			return INVALID_CUBEMAP;
 		}
@@ -349,6 +356,8 @@ namespace vk {
 		// cubemap's irradiance via set-0 binding 4.
 		vkDeviceWaitIdle(c.device);
 
+		if (s.prefilter_view)   vkDestroyImageView(c.device, s.prefilter_view, nullptr);
+		if (s.prefilter_image)  vmaDestroyImage(a, s.prefilter_image, s.prefilter_alloc);
 		if (s.irradiance_view)  vkDestroyImageView(c.device, s.irradiance_view, nullptr);
 		if (s.irradiance_image) vmaDestroyImage(a, s.irradiance_image, s.irradiance_alloc);
 		if (s.source_view)      vkDestroyImageView(c.device, s.source_view, nullptr);

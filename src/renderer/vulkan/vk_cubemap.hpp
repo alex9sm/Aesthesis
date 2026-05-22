@@ -15,7 +15,7 @@ namespace vk {
 	// Per-cubemap GPU state.
 	//   - source: original loaded cubemap (R8G8B8A8_SRGB + mip chain)
 	//   - irradiance: 32×32×6 RGBA16F diffuse convolution (baked at load)
-	//   - prefilter (Phase F4): per-roughness specular convolution
+	//   - prefilter: 128×128×6 RGBA16F, 5 mips, per-roughness GGX convolution
 	struct CubemapSlot {
 		// source cubemap (R8G8B8A8_SRGB, 6 layers + mip chain)
 		VkImage        source_image;
@@ -27,11 +27,16 @@ namespace vk {
 		VmaAllocation  irradiance_alloc;
 		VkImageView    irradiance_view;
 
+		// prefiltered specular cubemap (PREFILTER_SIZE base, RGBA16F, PREFILTER_MIP_COUNT mips)
+		VkImage        prefilter_image;
+		VmaAllocation  prefilter_alloc;
+		VkImageView    prefilter_view;   // full view (all mips), used for sampling
+
 		u32  size;        // base source mip width = height
 		u32  mip_levels;  // source mip count
-		f32  intensity;   // per-load LDR brightness multiplier (used in Phase F4)
+		f32  intensity;   // per-load LDR brightness multiplier (prefilter bake)
 
-		bool ibl_baked;   // true once irradiance (and later prefilter) is ready
+		bool ibl_baked;   // true once both irradiance and prefilter are ready
 		bool in_use;
 	};
 

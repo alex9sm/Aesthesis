@@ -17,9 +17,10 @@ layout(set = 0, binding = 0) uniform Globals {
     vec4 viewport_size;
 } g;
 
-// set 0 bindings 4/5/6 = IBL (irradiance / prefilter / BRDF LUT). Prefilter
-// + BRDF LUT remain placeholders here until Phase F4 wires specular IBL.
+// set 0 bindings 4/5/6 = IBL: diffuse irradiance, prefiltered specular, BRDF LUT.
 layout(set = 0, binding = 4) uniform samplerCube t_irradiance;
+layout(set = 0, binding = 5) uniform samplerCube t_prefilter;
+layout(set = 0, binding = 6) uniform sampler2D   t_brdf_lut;
 
 layout(set = 1, binding = 0) uniform sampler2D t_albedo;
 layout(set = 1, binding = 1) uniform sampler2D t_normal;
@@ -97,17 +98,24 @@ void main() {
     vec3 radiance = g.sun_color.rgb * g.sun_color.w;
     vec3 direct   = (diffuse + spec) * radiance * NdotL;
 
-    // --- diffuse IBL (Phase F3) ---
+    // --- IBL ambient (Phase F3 diffuse + Phase F4 specular, split-sum) ---
     // Irradiance is baked as (Σ L)/N from cosine-weighted importance sampling,
     // which absorbs the (1/pi) Lambertian factor; multiplying by albedo is
-    // energy-correct without an extra pi divide. Specular IBL still pending
-    // until Phase F4 — until then the ambient term is diffuse-only.
-    vec3 irradiance = texture(t_irradiance, N).rgb;
-    vec3 kS_ibl     = fresnel_schlick_roughness(NdotV, F0, roughness);
-    vec3 kD_ibl     = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
+    // energy-correct without an extra pi divide.
+    vec3 irradiance  = texture(t_irradiance, N).rgb;
+    vec3 kS_ibl      = fresnel_schlick_roughness(NdotV, F0, roughness);
+    vec3 kD_ibl      = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
     vec3 diffuse_ibl = kD_ibl * irradiance * albedo;
 
-    vec3 ambient = diffuse_ibl * ao;
+    // Prefiltered radiance along the reflection direction; mip selects
+    // roughness. MAX_LOD = PREFILTER_MIP_COUNT - 1 (5 mips → 4).
+    vec3  R           = reflect(-V, N);
+    const float MAX_LOD = 4.0;
+    vec3  prefiltered = textureLod(t_prefilter, R, roughness * MAX_LOD).rgb;
+    vec2  envBRDF     = texture(t_brdf_lut, vec2(NdotV, roughness)).rg;
+    vec3  specular_ibl = prefiltered * (F0 * envBRDF.x + envBRDF.y);
+
+    vec3 ambient = (diffuse_ibl + specular_ibl) * ao;
 
     out_color = vec4(direct + ambient, 1.0);
 }

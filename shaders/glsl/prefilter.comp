@@ -1,0 +1,64 @@
+#version 450
+
+#include "include/ibl.glsl"
+
+// One dispatch per prefilter mip. The output binding is a single-mip imageCube
+// view; the source is the loaded environment cubemap (with its own mip chain).
+layout(set = 0, binding = 0) uniform samplerCube u_source;
+layout(set = 0, binding = 1, rgba16f) uniform imageCube u_prefilter;
+
+layout(push_constant) uniform PC {
+    float roughness;    // target roughness for this mip: mip / (MIP_COUNT - 1)
+    uint  mip_size;     // edge length of this mip (e.g. 128, 64, 32, 16, 8)
+    float intensity;    // per-cubemap LDR brightness multiplier
+} pc;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+const uint SAMPLES = 1024u;
+
+// Same convention as irradiance.comp.
+vec3 face_uv_to_dir(uint face, vec2 uv) {
+    vec3 d;
+    if      (face == 0u) d = vec3( 1.0, -uv.y, -uv.x);  // +X
+    else if (face == 1u) d = vec3(-1.0, -uv.y,  uv.x);  // -X
+    else if (face == 2u) d = vec3( uv.x,  1.0,  uv.y);  // +Y
+    else if (face == 3u) d = vec3( uv.x, -1.0, -uv.y);  // -Y
+    else if (face == 4u) d = vec3( uv.x, -uv.y,  1.0);  // +Z
+    else                 d = vec3(-uv.x, -uv.y, -1.0);  // -Z
+    return normalize(d);
+}
+
+void main() {
+    ivec3 tex = ivec3(gl_GlobalInvocationID);
+    int   sz  = int(pc.mip_size);
+    if (tex.x >= sz || tex.y >= sz || tex.z >= 6) return;
+
+    vec2 uv = ((vec2(tex.xy) + 0.5) / float(sz)) * 2.0 - 1.0;
+    vec3 N  = face_uv_to_dir(uint(tex.z), uv);
+
+    // Epic 2013 split-sum prefilter: assume V == R == N so the integral is a
+    // pure function of N and roughness. Accumulate environment radiance along
+    // GGX-importance-sampled reflection vectors L, weighted by NdotL.
+    vec3  V = N;
+
+    vec3  prefiltered  = vec3(0.0);
+    float total_weight = 0.0;
+
+    for (uint i = 0u; i < SAMPLES; i++) {
+        vec2 Xi = hammersley(i, SAMPLES);
+        vec3 H  = importance_sample_ggx(Xi, N, pc.roughness);
+        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+
+        float NdotL = max(dot(N, L), 0.0);
+        if (NdotL > 0.0) {
+            // textureLod with mip 0 — could be improved with the
+            // Křivánek/Colbert mip-selection trick, but mip 0 is correct.
+            prefiltered  += textureLod(u_source, L, 0.0).rgb * NdotL;
+            total_weight += NdotL;
+        }
+    }
+    prefiltered = (prefiltered / max(total_weight, 1e-4)) * pc.intensity;
+
+    imageStore(u_prefilter, tex, vec4(prefiltered, 1.0));
+}

@@ -1,11 +1,13 @@
 #include "api.hpp"
 #include "gltf.hpp"
+#include "font.hpp"
 #include "vk_init.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
+#include "vk_draw2d.hpp"
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
 #include "vk_texture.hpp"
@@ -58,11 +60,36 @@ namespace renderer {
 
 	static ModelInternal models[MAX_MODELS] = {};
 
+	// --- font slot table ---
+
+	static constexpr u32 MAX_FONTS = 8;
+
+	struct FontInternal {
+		bool          in_use;
+		TextureHandle atlas_tex;     // bindless texture slot of the SDF atlas
+		f32           pixel_height;
+		f32           ascent;
+		f32           descent;
+		f32           line_gap;
+		i32           tex_w;
+		i32           tex_h;
+		font::GlyphInfo glyphs[font::NUM_CHARS];
+	};
+
+	static FontInternal fonts[MAX_FONTS] = {};
+
 	static ModelHandle alloc_model_slot() {
 		for (u32 i = 0; i < MAX_MODELS; i++) {
 			if (!models[i].in_use) return i;
 		}
 		return INVALID_MODEL;
+	}
+
+	static FontHandle alloc_font_slot() {
+		for (u32 i = 0; i < MAX_FONTS; i++) {
+			if (!fonts[i].in_use) return i;
+		}
+		return INVALID_FONT;
 	}
 
 	// --- init / shutdown ---
@@ -73,6 +100,7 @@ namespace renderer {
 			return false;
 		}
 		memory::set(models, 0, sizeof(models));
+		memory::set(fonts, 0, sizeof(fonts));
 		logger::info("Renderer initialized");
 		return true;
 	}
@@ -84,6 +112,11 @@ namespace renderer {
 			}
 		}
 		memory::set(models, 0, sizeof(models));
+
+		// fonts release their bindless texture slot only — vk::shutdown will
+		// tear down all remaining textures regardless.
+		memory::set(fonts, 0, sizeof(fonts));
+
 		vk::shutdown();
 		logger::info("Renderer shutdown");
 	}
@@ -383,9 +416,95 @@ namespace renderer {
 		vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);
 		vk::execute_debug_pass(cmd, image_index, g_debug_mode);
+		vk::execute_overlay_pass(cmd, image_index);
 
 		vk::end_frame();
 		frame_active = false;
+	}
+
+	// --- fonts ---
+
+	FontHandle load_font(const char* path, f32 pixel_height) {
+		FontHandle slot = alloc_font_slot();
+		if (slot == INVALID_FONT) {
+			logger::error("Out of font slots");
+			return INVALID_FONT;
+		}
+
+		font::Atlas atlas = {};
+		if (!font::generate_atlas(path, pixel_height, &atlas)) {
+			return INVALID_FONT;
+		}
+
+		TextureHandle tex = vk::load_texture_pixels(atlas.bitmap, (u32)atlas.tex_w, (u32)atlas.tex_h);
+		if (tex == INVALID_TEXTURE) {
+			font::destroy(&atlas);
+			logger::error("Failed to upload font atlas texture");
+			return INVALID_FONT;
+		}
+
+		FontInternal& f = fonts[slot];
+		f.in_use       = true;
+		f.atlas_tex    = tex;
+		f.pixel_height = atlas.pixel_height;
+		f.ascent       = atlas.ascent;
+		f.descent      = atlas.descent;
+		f.line_gap     = atlas.line_gap;
+		f.tex_w        = atlas.tex_w;
+		f.tex_h        = atlas.tex_h;
+		for (i32 i = 0; i < font::NUM_CHARS; i++) {
+			f.glyphs[i] = atlas.glyphs[i];
+		}
+
+		font::destroy(&atlas);
+		return slot;
+	}
+
+	void unload_font(FontHandle handle) {
+		if (handle >= MAX_FONTS) return;
+		FontInternal& f = fonts[handle];
+		if (!f.in_use) return;
+		if (f.atlas_tex != INVALID_TEXTURE) {
+			vk::unload_texture(f.atlas_tex);
+		}
+		memory::set(&f, 0, sizeof(f));
+	}
+
+	// --- 2D overlay ---
+
+	void draw_2d_rect(f32 x, f32 y, f32 w, f32 h, vec4 color) {
+		if (!frame_active) return;
+		vk::draw2d_push_rect(x, y, w, h, color);
+	}
+
+	void draw_text(FontHandle font, const char* str, f32 x, f32 y, f32 scale, vec4 color) {
+		if (!frame_active) return;
+		if (!str) return;
+		if (font >= MAX_FONTS) return;
+		const FontInternal& f = fonts[font];
+		if (!f.in_use) return;
+
+		// baseline sits `ascent` pixels below the requested top-left pen origin
+		f32 pen_x = x;
+		f32 baseline_y = y + f.ascent * scale;
+
+		for (const char* p = str; *p; p++) {
+			i32 idx = (i32)(u8)*p - font::FIRST_CHAR;
+			if (idx < 0 || idx >= font::NUM_CHARS) continue;
+
+			const font::GlyphInfo& g = f.glyphs[idx];
+			f32 x0 = pen_x      + g.xoff  * scale;
+			f32 y0 = baseline_y + g.yoff  * scale;
+			f32 x1 = pen_x      + g.xoff2 * scale;
+			f32 y1 = baseline_y + g.yoff2 * scale;
+
+			if (g.u1 > g.u0 && g.v1 > g.v0) {
+				vk::draw2d_push_text_quad(x0, y0, x1, y1,
+					g.u0, g.v0, g.u1, g.v1, color, f.atlas_tex);
+			}
+
+			pen_x += g.xadvance * scale;
+		}
 	}
 
 	void cycle_debug_mode() {

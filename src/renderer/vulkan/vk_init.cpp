@@ -13,6 +13,7 @@
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
+#include "vk_draw2d.hpp"
 #include "platform.hpp"
 #include "log.hpp"
 #include "memory.hpp"
@@ -228,6 +229,7 @@ namespace vk {
 		if (!init_gbuffer()) return false;
 		if (!init_lighting()) return false;
 		if (!init_debug()) return false;
+		if (!init_draw2d()) return false;
 		lighting_refresh_descriptors();
 		debug_refresh_descriptors();
 
@@ -238,6 +240,7 @@ namespace vk {
 	void shutdown() {
 		if (ctx.device) {
 			vkDeviceWaitIdle(ctx.device);
+			shutdown_draw2d();
 			shutdown_debug();
 			shutdown_lighting();
 			shutdown_gbuffer();

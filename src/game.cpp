@@ -31,7 +31,7 @@ static void game_update(f32 dt) {
 	mat4 projection = camera::projection(g_camera, aspect);
 
 	renderer::begin_frame(view, projection);
-	scene::submit();
+	scene::submit(dt);
 	renderer::end_frame();
 }
 

@@ -315,11 +315,8 @@ namespace vk {
 
 		vkCmdEndRendering(cmd);
 
-		// swapchain image: COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
-		transition_swapchain(cmd, dst,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+		// leave the swapchain image in COLOR_ATTACHMENT_OPTIMAL — the overlay
+		// pass writes into it next and owns the final transition to PRESENT_SRC.
 	}
 
 }

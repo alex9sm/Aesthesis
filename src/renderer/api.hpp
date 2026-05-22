@@ -22,6 +22,9 @@ namespace renderer {
 	using CubemapHandle = u32;
 	static constexpr CubemapHandle INVALID_CUBEMAP = (CubemapHandle)~0u;
 
+	using FontHandle = u32;
+	static constexpr FontHandle INVALID_FONT = (FontHandle)~0u;
+
 	// engine-provided reserved texture slots, always populated
 	static constexpr TextureHandle DEFAULT_ALBEDO = 0;  // 1x1 white
 	static constexpr TextureHandle DEFAULT_NORMAL = 1;  // 1x1 flat-normal
@@ -96,6 +99,17 @@ namespace renderer {
 	void submit_model(ModelHandle model, const mat4& transform,
 		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
 	void end_frame();
+
+	// fonts — bakes an SDF atlas from a TTF and uploads it as a bindless
+	// texture. must be called OUTSIDE begin_frame / end_frame.
+	FontHandle load_font(const char* path, f32 pixel_height);
+	void       unload_font(FontHandle handle);
+
+	// 2D overlay (drawn after the 3D scene, no depth). screen-space pixel
+	// coordinates with (0,0) at the top-left. colors are RGBA with straight
+	// alpha. queues are flushed inside end_frame().
+	void draw_2d_rect(f32 x, f32 y, f32 w, f32 h, vec4 color);
+	void draw_text(FontHandle font, const char* str, f32 x, f32 y, f32 scale, vec4 color);
 
 	// debug
 	void cycle_debug_mode();

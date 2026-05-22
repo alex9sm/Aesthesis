@@ -9,6 +9,7 @@ namespace scene {
 	void shutdown();
 
 	// queues all of the scene's meshes onto the renderer for the current frame.
-	void submit();
+	// `dt` is wall-clock seconds since the previous submit (used for the FPS HUD).
+	void submit(f32 dt);
 
 }

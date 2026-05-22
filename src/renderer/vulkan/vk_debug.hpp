@@ -14,8 +14,9 @@ namespace vk {
 	// must be called once after init_targets and again after every resize_targets.
 	void debug_refresh_descriptors();
 
-	// composites the selected debug mode onto the swapchain image and
-	// transitions the swapchain image into PRESENT_SRC_KHR.
+	// composites the selected debug mode onto the swapchain image. leaves the
+	// swapchain image in COLOR_ATTACHMENT_OPTIMAL — the overlay pass handles
+	// the final transition to PRESENT_SRC_KHR.
 	void execute_debug_pass(VkCommandBuffer cmd, u32 swapchain_image_index, u32 mode);
 
 }

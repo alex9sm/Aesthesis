@@ -28,13 +28,12 @@ namespace renderer {
 	static constexpr TextureHandle DEFAULT_ORM    = 2;  // 1x1 ORM neutral
 
 	enum DebugMode : u32 {
-		DEBUG_FINAL    = 0,  // Reinhard(scene_hdr) + gamma 2.2
+		DEBUG_FINAL    = 0,
 		DEBUG_ALBEDO   = 1,
 		DEBUG_NORMAL   = 2,
 		DEBUG_MATERIAL = 3,
 		DEBUG_DEPTH    = 4,
-		DEBUG_HDR_RAW  = 5,
-		DEBUG_COUNT    = 6
+		DEBUG_COUNT    = 5
 	};
 
 	// developer-facing material description. unset texture handles default to
@@ -65,14 +64,18 @@ namespace renderer {
 	ModelHandle load_model(const char* path);
 	void unload_model(ModelHandle handle);
 
-	// loads a single PNG at assets/textures/global/<name>.png containing the
-	// 6 cube faces as a horizontal strip (left-to-right: +X, -X, +Y, -Y, +Z, -Z).
-	// The image must be 6N wide × N tall.
-	// `intensity` is a per-cubemap LDR brightness multiplier applied during the
-	// IBL prefilter bake (Phase F4); ignored at load time, 1.0 = neutral.
-	// load_cubemap also bakes diffuse irradiance for use as an environment.
-	// Must be called outside begin_frame / end_frame.
+	// Loads 6 PNG faces from assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png
+	// and bakes the irradiance + prefilter IBL cubemaps. `intensity` is a
+	// per-cubemap LDR brightness multiplier applied during both bakes
+	// (1.0 = neutral; typical artistic value 2.0-6.0 for sunny outdoor LDR
+	// sources to compensate for crushed dynamic range).
+	// Must be called OUTSIDE begin_frame / end_frame — records and submits a
+	// one-shot bake command buffer to the graphics queue.
 	CubemapHandle load_cubemap(const char* name, f32 intensity = 1.0f);
+
+	// Releases the cubemap's GPU resources. Safe to call on the currently
+	// active environment — reverts to the neutral placeholder first.
+	// Must be called OUTSIDE begin_frame / end_frame.
 	void          unload_cubemap(CubemapHandle handle);
 
 	// IBL environment selection. set_environment_cubemap drives the diffuse

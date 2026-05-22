@@ -23,12 +23,7 @@ namespace scene {
 
 		// directional sun: up and slightly forward/right of the origin.
 		renderer::set_sun({ -0.5f, 1.0f, -0.3f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
-
-		// IBL environment: drives diffuse (and later specular) ambient.
-		// load_cubemap reads assets/textures/global/sky.png (6N×N strip,
-		// left-to-right +X,-X,+Y,-Y,+Z,-Z) and bakes irradiance at load time;
-		// set_environment_cubemap is then a pure descriptor swap.
-		env_cubemap = renderer::load_cubemap("pinkstudio");
+		env_cubemap = renderer::load_cubemap("whitestudio", 4.0f);
 		if (env_cubemap != renderer::INVALID_CUBEMAP) {
 			renderer::set_environment_cubemap(env_cubemap);
 		}

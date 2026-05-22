@@ -34,7 +34,17 @@ namespace vk {
 
 		u32  size;        // base source mip width = height
 		u32  mip_levels;  // source mip count
-		f32  intensity;   // per-load LDR brightness multiplier (prefilter bake)
+		f32  intensity;   // per-load LDR brightness multiplier (both IBL bakes)
+
+		// --- async bake bookkeeping ---
+		// Single cmd buffer records both irradiance + prefilter; submitted
+		// without a CPU wait. bake_fence fires when the GPU is done with
+		// all of slot's bake work. unload_cubemap and shutdown_cubemaps wait
+		// on it before tearing the transient resources down.
+		VkFence          bake_fence;
+		VkCommandPool    bake_cmd_pool;
+		VkDescriptorPool bake_desc_pool;
+		VkImageView      bake_pref_mip_views[5]; // PREFILTER_MIP_COUNT per-mip storage views
 
 		bool ibl_baked;   // true once both irradiance and prefilter are ready
 		bool in_use;

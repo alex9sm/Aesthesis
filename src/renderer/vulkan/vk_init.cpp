@@ -241,9 +241,9 @@ namespace vk {
 			shutdown_debug();
 			shutdown_lighting();
 			shutdown_gbuffer();
+			shutdown_cubemaps();
 			shutdown_ibl();
 			shutdown_materials();
-			shutdown_cubemaps();
 			shutdown_textures();
 			shutdown_instances();
 			shutdown_globals();

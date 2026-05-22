@@ -287,6 +287,8 @@ namespace vk {
 
 		for (u32 i = 0; i < MAX_CUBEMAPS; i++) {
 			CubemapSlot& s = cubemaps[i];
+			// Drain any still-in-flight bake before destroying images it writes to.
+			release_bake_resources(&s);
 			if (s.prefilter_view)   vkDestroyImageView(c.device, s.prefilter_view, nullptr);
 			if (s.prefilter_image)  vmaDestroyImage(a, s.prefilter_image, s.prefilter_alloc);
 			if (s.irradiance_view)  vkDestroyImageView(c.device, s.irradiance_view, nullptr);
@@ -327,15 +329,11 @@ namespace vk {
 
 		renderer::free_cubemap_faces(&faces);
 
-		// IBL bake: irradiance + prefilter. Source is already
-		// SHADER_READ_ONLY_OPTIMAL coming out of upload_cubemap.
-		if (!bake_irradiance(slot)) {
-			logger::error("IBL irradiance bake failed for cubemap '%s'", name);
-			unload_cubemap(slot);
-			return INVALID_CUBEMAP;
-		}
-		if (!bake_prefilter(slot)) {
-			logger::error("IBL prefilter bake failed for cubemap '%s'", name);
+		// IBL bake: irradiance + prefilter recorded into one cmd buffer and
+		// submitted asynchronously (no CPU vkQueueWaitIdle). Source is
+		// already SHADER_READ_ONLY_OPTIMAL coming out of upload_cubemap.
+		if (!bake_ibl(slot)) {
+			logger::error("IBL bake failed for cubemap '%s'", name);
 			unload_cubemap(slot);
 			return INVALID_CUBEMAP;
 		}
@@ -352,9 +350,19 @@ namespace vk {
 
 		Context& c = context();
 		VmaAllocator a = allocator();
-		// Wait for any in-flight frame that might still be sampling this
-		// cubemap's irradiance via set-0 binding 4.
-		vkDeviceWaitIdle(c.device);
+
+		// If this cubemap is currently bound as the active environment, revert
+		// to neutral placeholders first. set_environment_cubemap synchronizes
+		// against in-flight frames so the descriptor swap is safe before we
+		// destroy the image views below.
+		if (active_environment() == handle) {
+			set_environment_cubemap(INVALID_CUBEMAP);
+		}
+
+		// Wait on the slot's own bake fence (if any) and destroy the bake's
+		// transient cmd/descriptor pools and per-mip views. Replaces the
+		// previous heavy-handed vkDeviceWaitIdle.
+		release_bake_resources(&s);
 
 		if (s.prefilter_view)   vkDestroyImageView(c.device, s.prefilter_view, nullptr);
 		if (s.prefilter_image)  vmaDestroyImage(a, s.prefilter_image, s.prefilter_alloc);

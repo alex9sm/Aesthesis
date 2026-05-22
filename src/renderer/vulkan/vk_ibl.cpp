@@ -29,6 +29,10 @@ namespace vk {
 		f32 intensity;
 	};
 
+	struct IrradiancePC {
+		f32 intensity;
+	};
+
 	struct IblImage {
 		VkImage       image;
 		VmaAllocation alloc;
@@ -601,10 +605,17 @@ namespace vk {
 			return false;
 		}
 
+		VkPushConstantRange ipcr = {};
+		ipcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		ipcr.offset = 0;
+		ipcr.size = sizeof(IrradiancePC);
+
 		VkPipelineLayoutCreateInfo pli = {};
 		pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		pli.setLayoutCount = 1;
 		pli.pSetLayouts = &irr_set_layout;
+		pli.pushConstantRangeCount = 1;
+		pli.pPushConstantRanges = &ipcr;
 		if (vkCreatePipelineLayout(c.device, &pli, nullptr, &irr_pipeline_layout) != VK_SUCCESS) {
 			vkDestroyShaderModule(c.device, sm, nullptr);
 			logger::fatal("Failed to create irradiance pipeline layout");
@@ -631,21 +642,13 @@ namespace vk {
 		return true;
 	}
 
-	// Allocates the irradiance cubemap on a slot, then dispatches the bake.
-	// Source cubemap must already be SHADER_READ_ONLY_OPTIMAL on entry.
-	bool bake_irradiance(CubemapHandle handle) {
-		const CubemapSlot* slot_c = get_cubemap(handle);
-		if (!slot_c) {
-			logger::error("bake_irradiance: invalid cubemap handle");
-			return false;
-		}
-		// We need a mutable view of the slot to store the new resources.
-		CubemapSlot* slot = (CubemapSlot*)slot_c;
+	// --- internal helpers for the combined bake_ibl path ---
 
+	// Allocate the irradiance image + view on the slot.
+	static bool create_irradiance_image(CubemapSlot* slot) {
 		Context&    c = context();
 		VmaAllocator a = allocator();
 
-		// --- create the irradiance cubemap (32×32×6, RGBA16F, single mip) ---
 		VkImageCreateInfo ici = {};
 		ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		ici.imageType = VK_IMAGE_TYPE_2D;
@@ -663,7 +666,7 @@ namespace vk {
 		VmaAllocationCreateInfo aci = {};
 		aci.usage = VMA_MEMORY_USAGE_AUTO;
 		if (vmaCreateImage(a, &ici, &aci, &slot->irradiance_image, &slot->irradiance_alloc, nullptr) != VK_SUCCESS) {
-			logger::error("bake_irradiance: vmaCreateImage failed");
+			logger::error("bake_ibl: irradiance vmaCreateImage failed");
 			return false;
 		}
 
@@ -681,62 +684,197 @@ namespace vk {
 			vmaDestroyImage(a, slot->irradiance_image, slot->irradiance_alloc);
 			slot->irradiance_image = VK_NULL_HANDLE;
 			slot->irradiance_alloc = {};
-			logger::error("bake_irradiance: vkCreateImageView failed");
+			logger::error("bake_ibl: irradiance vkCreateImageView failed");
+			return false;
+		}
+		return true;
+	}
+
+	// Allocate the prefilter image, its full sampling view, and one per-mip
+	// storage view (stored on slot->bake_pref_mip_views — released later by
+	// release_bake_resources once the bake fence signals).
+	static bool create_prefilter_image(CubemapSlot* slot) {
+		Context&    c = context();
+		VmaAllocator a = allocator();
+
+		VkImageCreateInfo ici = {};
+		ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		ici.imageType = VK_IMAGE_TYPE_2D;
+		ici.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+		ici.extent = { PREFILTER_SIZE, PREFILTER_SIZE, 1 };
+		ici.mipLevels = PREFILTER_MIP_COUNT;
+		ici.arrayLayers = 6;
+		ici.samples = VK_SAMPLE_COUNT_1_BIT;
+		ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+		ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ici.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+
+		VmaAllocationCreateInfo aci = {};
+		aci.usage = VMA_MEMORY_USAGE_AUTO;
+		if (vmaCreateImage(a, &ici, &aci, &slot->prefilter_image, &slot->prefilter_alloc, nullptr) != VK_SUCCESS) {
+			logger::error("bake_ibl: prefilter vmaCreateImage failed");
 			return false;
 		}
 
-		// --- transient descriptor pool + set referencing source + irradiance ---
+		VkImageViewCreateInfo full_vci = {};
+		full_vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		full_vci.image = slot->prefilter_image;
+		full_vci.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+		full_vci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+		full_vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		full_vci.subresourceRange.baseMipLevel = 0;
+		full_vci.subresourceRange.levelCount = PREFILTER_MIP_COUNT;
+		full_vci.subresourceRange.baseArrayLayer = 0;
+		full_vci.subresourceRange.layerCount = 6;
+		if (vkCreateImageView(c.device, &full_vci, nullptr, &slot->prefilter_view) != VK_SUCCESS) {
+			vmaDestroyImage(a, slot->prefilter_image, slot->prefilter_alloc);
+			slot->prefilter_image = VK_NULL_HANDLE;
+			slot->prefilter_alloc = {};
+			logger::error("bake_ibl: prefilter vkCreateImageView (full) failed");
+			return false;
+		}
+
+		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
+			VkImageViewCreateInfo mvci = full_vci;
+			mvci.subresourceRange.baseMipLevel = m;
+			mvci.subresourceRange.levelCount = 1;
+			if (vkCreateImageView(c.device, &mvci, nullptr, &slot->bake_pref_mip_views[m]) != VK_SUCCESS) {
+				logger::error("bake_ibl: prefilter per-mip view %u failed", m);
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// Combined irradiance + prefilter bake: single command buffer, async
+	// submit with slot->bake_fence. The transient cmd pool / descriptor pool
+	// / per-mip views are stored on the slot and released by
+	// release_bake_resources once the fence signals.
+	bool bake_ibl(CubemapHandle handle) {
+		const CubemapSlot* slot_c = get_cubemap(handle);
+		if (!slot_c) {
+			logger::error("bake_ibl: invalid cubemap handle");
+			return false;
+		}
+		CubemapSlot* slot = (CubemapSlot*)slot_c;
+
+		Context& c = context();
+
+		if (!create_irradiance_image(slot)) return false;
+		if (!create_prefilter_image(slot))  return false;
+
+		// --- one descriptor pool sized for 1 irradiance + PREFILTER_MIP_COUNT prefilter sets ---
 		VkDescriptorPoolSize ps[2] = {};
 		ps[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		ps[0].descriptorCount = 1;
+		ps[0].descriptorCount = 1 + PREFILTER_MIP_COUNT;
 		ps[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		ps[1].descriptorCount = 1;
+		ps[1].descriptorCount = 1 + PREFILTER_MIP_COUNT;
 
 		VkDescriptorPoolCreateInfo pci = {};
 		pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		pci.maxSets = 1;
+		pci.maxSets = 1 + PREFILTER_MIP_COUNT;
 		pci.poolSizeCount = 2;
 		pci.pPoolSizes = ps;
+		if (vkCreateDescriptorPool(c.device, &pci, nullptr, &slot->bake_desc_pool) != VK_SUCCESS) {
+			logger::error("bake_ibl: descriptor pool creation failed");
+			return false;
+		}
 
-		VkDescriptorPool pool = VK_NULL_HANDLE;
-		vkCreateDescriptorPool(c.device, &pci, nullptr, &pool);
+		// --- allocate irradiance set + prefilter mip sets ---
+		VkDescriptorSet irr_set = VK_NULL_HANDLE;
+		{
+			VkDescriptorSetAllocateInfo dsai = {};
+			dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsai.descriptorPool = slot->bake_desc_pool;
+			dsai.descriptorSetCount = 1;
+			dsai.pSetLayouts = &irr_set_layout;
+			vkAllocateDescriptorSets(c.device, &dsai, &irr_set);
 
-		VkDescriptorSetAllocateInfo dsai = {};
-		dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsai.descriptorPool = pool;
-		dsai.descriptorSetCount = 1;
-		dsai.pSetLayouts = &irr_set_layout;
-		VkDescriptorSet set = VK_NULL_HANDLE;
-		vkAllocateDescriptorSets(c.device, &dsai, &set);
+			VkDescriptorImageInfo src_i = {};
+			src_i.sampler = ibl_sampler;
+			src_i.imageView = slot->source_view;
+			src_i.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			VkDescriptorImageInfo dst_i = {};
+			dst_i.imageView = slot->irradiance_view;
+			dst_i.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-		VkDescriptorImageInfo src_i = {};
-		src_i.sampler = ibl_sampler;
-		src_i.imageView = slot->source_view;
-		src_i.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			VkWriteDescriptorSet ws[2] = {};
+			ws[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			ws[0].dstSet = irr_set;
+			ws[0].dstBinding = 0;
+			ws[0].descriptorCount = 1;
+			ws[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			ws[0].pImageInfo = &src_i;
+			ws[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			ws[1].dstSet = irr_set;
+			ws[1].dstBinding = 1;
+			ws[1].descriptorCount = 1;
+			ws[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+			ws[1].pImageInfo = &dst_i;
+			vkUpdateDescriptorSets(c.device, 2, ws, 0, nullptr);
+		}
 
-		VkDescriptorImageInfo dst_i = {};
-		dst_i.imageView = slot->irradiance_view;
-		dst_i.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		VkDescriptorSet pref_sets[PREFILTER_MIP_COUNT] = {};
+		{
+			VkDescriptorSetLayout layouts[PREFILTER_MIP_COUNT];
+			for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) layouts[m] = pref_set_layout;
+			VkDescriptorSetAllocateInfo dsai = {};
+			dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsai.descriptorPool = slot->bake_desc_pool;
+			dsai.descriptorSetCount = PREFILTER_MIP_COUNT;
+			dsai.pSetLayouts = layouts;
+			vkAllocateDescriptorSets(c.device, &dsai, pref_sets);
 
-		VkWriteDescriptorSet ws[2] = {};
-		ws[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		ws[0].dstSet = set;
-		ws[0].dstBinding = 0;
-		ws[0].descriptorCount = 1;
-		ws[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		ws[0].pImageInfo = &src_i;
-		ws[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		ws[1].dstSet = set;
-		ws[1].dstBinding = 1;
-		ws[1].descriptorCount = 1;
-		ws[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		ws[1].pImageInfo = &dst_i;
-		vkUpdateDescriptorSets(c.device, 2, ws, 0, nullptr);
+			VkDescriptorImageInfo src_infos[PREFILTER_MIP_COUNT] = {};
+			VkDescriptorImageInfo dst_infos[PREFILTER_MIP_COUNT] = {};
+			VkWriteDescriptorSet  writes[PREFILTER_MIP_COUNT * 2] = {};
+			for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
+				src_infos[m].sampler = ibl_sampler;
+				src_infos[m].imageView = slot->source_view;
+				src_infos[m].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				dst_infos[m].imageView = slot->bake_pref_mip_views[m];
+				dst_infos[m].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-		// --- record + submit dispatch ---
-		VkCommandPool cmd_pool = VK_NULL_HANDLE;
-		VkCommandBuffer cmd = begin_one_shot(&cmd_pool);
+				writes[m * 2 + 0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[m * 2 + 0].dstSet = pref_sets[m];
+				writes[m * 2 + 0].dstBinding = 0;
+				writes[m * 2 + 0].descriptorCount = 1;
+				writes[m * 2 + 0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				writes[m * 2 + 0].pImageInfo = &src_infos[m];
 
+				writes[m * 2 + 1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[m * 2 + 1].dstSet = pref_sets[m];
+				writes[m * 2 + 1].dstBinding = 1;
+				writes[m * 2 + 1].descriptorCount = 1;
+				writes[m * 2 + 1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+				writes[m * 2 + 1].pImageInfo = &dst_infos[m];
+			}
+			vkUpdateDescriptorSets(c.device, PREFILTER_MIP_COUNT * 2, writes, 0, nullptr);
+		}
+
+		// --- cmd pool + cmd buffer (kept alive on the slot until the fence signals) ---
+		VkCommandPoolCreateInfo cpci = {};
+		cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		cpci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+		cpci.queueFamilyIndex = c.graphics_queue_index;
+		vkCreateCommandPool(c.device, &cpci, nullptr, &slot->bake_cmd_pool);
+
+		VkCommandBufferAllocateInfo cbai = {};
+		cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cbai.commandPool = slot->bake_cmd_pool;
+		cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cbai.commandBufferCount = 1;
+		VkCommandBuffer cmd = VK_NULL_HANDLE;
+		vkAllocateCommandBuffers(c.device, &cbai, &cmd);
+
+		VkCommandBufferBeginInfo bi = {};
+		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		vkBeginCommandBuffer(cmd, &bi);
+
+		// --- irradiance: UNDEFINED -> GENERAL, dispatch, GENERAL -> SHADER_READ ---
 		simple_barrier(cmd, slot->irradiance_image,
 			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
 			0, VK_ACCESS_SHADER_WRITE_BIT,
@@ -745,8 +883,13 @@ namespace vk {
 
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irr_pipeline);
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, irr_pipeline_layout,
-			0, 1, &set, 0, nullptr);
-		// 8×8 workgroups across 32×32, one z-slice per face
+			0, 1, &irr_set, 0, nullptr);
+		{
+			IrradiancePC ipc = {};
+			ipc.intensity = slot->intensity;
+			vkCmdPushConstants(cmd, irr_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+				0, sizeof(IrradiancePC), &ipc);
+		}
 		vkCmdDispatch(cmd, IRRADIANCE_SIZE / 8, IRRADIANCE_SIZE / 8, 6);
 
 		simple_barrier(cmd, slot->irradiance_image,
@@ -755,13 +898,111 @@ namespace vk {
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			6);
 
-		end_one_shot(cmd, cmd_pool);
+		// --- prefilter: all mips UNDEFINED -> GENERAL ---
+		{
+			VkImageMemoryBarrier b = {};
+			b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			b.image = slot->prefilter_image;
+			b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			b.subresourceRange.baseMipLevel = 0;
+			b.subresourceRange.levelCount = PREFILTER_MIP_COUNT;
+			b.subresourceRange.baseArrayLayer = 0;
+			b.subresourceRange.layerCount = 6;
+			b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+			b.srcAccessMask = 0;
+			b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			vkCmdPipelineBarrier(cmd,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				0, 0, nullptr, 0, nullptr, 1, &b);
+		}
 
-		vkDestroyDescriptorPool(c.device, pool, nullptr);
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pref_pipeline);
+		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
+			u32 mip_size = PREFILTER_SIZE >> m;
+			f32 roughness = (f32)m / (f32)(PREFILTER_MIP_COUNT - 1);
 
-		// ibl_baked is set by bake_prefilter (which runs immediately after);
-		// keep it false here so a partial bake never gets bound.
+			PrefilterPC pc = {};
+			pc.roughness = roughness;
+			pc.mip_size  = mip_size;
+			pc.intensity = slot->intensity;
+			vkCmdPushConstants(cmd, pref_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+				0, sizeof(PrefilterPC), &pc);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pref_pipeline_layout,
+				0, 1, &pref_sets[m], 0, nullptr);
+
+			u32 groups_xy = (mip_size + 7) / 8;
+			vkCmdDispatch(cmd, groups_xy, groups_xy, 6);
+		}
+
+		// --- prefilter: all mips GENERAL -> SHADER_READ ---
+		{
+			VkImageMemoryBarrier b = {};
+			b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			b.image = slot->prefilter_image;
+			b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			b.subresourceRange.baseMipLevel = 0;
+			b.subresourceRange.levelCount = PREFILTER_MIP_COUNT;
+			b.subresourceRange.baseArrayLayer = 0;
+			b.subresourceRange.layerCount = 6;
+			b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+			b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			vkCmdPipelineBarrier(cmd,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+				0, 0, nullptr, 0, nullptr, 1, &b);
+		}
+
+		vkEndCommandBuffer(cmd);
+
+		// --- async submit with the slot's bake fence (no CPU wait) ---
+		VkFenceCreateInfo fci = {};
+		fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		if (vkCreateFence(c.device, &fci, nullptr, &slot->bake_fence) != VK_SUCCESS) {
+			logger::error("bake_ibl: fence creation failed");
+			return false;
+		}
+
+		VkSubmitInfo si = {};
+		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		si.commandBufferCount = 1;
+		si.pCommandBuffers = &cmd;
+		vkQueueSubmit(c.graphics_queue, 1, &si, slot->bake_fence);
+
+		slot->ibl_baked = true;
 		return true;
+	}
+
+	void release_bake_resources(CubemapSlot* slot) {
+		if (!slot) return;
+		Context& c = context();
+
+		if (slot->bake_fence) {
+			// Wait up to 1 s for the bake to complete; cubemap bakes finish in
+			// a few ms so this is effectively a non-wait at unload time.
+			vkWaitForFences(c.device, 1, &slot->bake_fence, VK_TRUE, 1'000'000'000ull);
+			vkDestroyFence(c.device, slot->bake_fence, nullptr);
+			slot->bake_fence = VK_NULL_HANDLE;
+		}
+		if (slot->bake_desc_pool) {
+			vkDestroyDescriptorPool(c.device, slot->bake_desc_pool, nullptr);
+			slot->bake_desc_pool = VK_NULL_HANDLE;
+		}
+		if (slot->bake_cmd_pool) {
+			vkDestroyCommandPool(c.device, slot->bake_cmd_pool, nullptr);
+			slot->bake_cmd_pool = VK_NULL_HANDLE;
+		}
+		for (u32 m = 0; m < 5; m++) {
+			if (slot->bake_pref_mip_views[m]) {
+				vkDestroyImageView(c.device, slot->bake_pref_mip_views[m], nullptr);
+				slot->bake_pref_mip_views[m] = VK_NULL_HANDLE;
+			}
+		}
 	}
 
 	// --- prefilter compute pipeline (persistent) ---
@@ -834,214 +1075,6 @@ namespace vk {
 		return true;
 	}
 
-	// Allocates the prefilter cubemap on a slot and dispatches one compute
-	// pass per mip. Source must be SHADER_READ_ONLY_OPTIMAL on entry.
-	bool bake_prefilter(CubemapHandle handle) {
-		const CubemapSlot* slot_c = get_cubemap(handle);
-		if (!slot_c) {
-			logger::error("bake_prefilter: invalid cubemap handle");
-			return false;
-		}
-		CubemapSlot* slot = (CubemapSlot*)slot_c;
-
-		Context&     c = context();
-		VmaAllocator a = allocator();
-
-		// --- create the prefilter cubemap (PREFILTER_SIZE base, 5 mips, RGBA16F) ---
-		VkImageCreateInfo ici = {};
-		ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		ici.imageType = VK_IMAGE_TYPE_2D;
-		ici.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-		ici.extent = { PREFILTER_SIZE, PREFILTER_SIZE, 1 };
-		ici.mipLevels = PREFILTER_MIP_COUNT;
-		ici.arrayLayers = 6;
-		ici.samples = VK_SAMPLE_COUNT_1_BIT;
-		ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-		ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-		ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		ici.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-
-		VmaAllocationCreateInfo aci = {};
-		aci.usage = VMA_MEMORY_USAGE_AUTO;
-		if (vmaCreateImage(a, &ici, &aci, &slot->prefilter_image, &slot->prefilter_alloc, nullptr) != VK_SUCCESS) {
-			logger::error("bake_prefilter: vmaCreateImage failed");
-			return false;
-		}
-
-		// full sampling view: VIEW_TYPE_CUBE, all mips, 6 layers
-		VkImageViewCreateInfo full_vci = {};
-		full_vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		full_vci.image = slot->prefilter_image;
-		full_vci.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-		full_vci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-		full_vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		full_vci.subresourceRange.baseMipLevel = 0;
-		full_vci.subresourceRange.levelCount = PREFILTER_MIP_COUNT;
-		full_vci.subresourceRange.baseArrayLayer = 0;
-		full_vci.subresourceRange.layerCount = 6;
-		if (vkCreateImageView(c.device, &full_vci, nullptr, &slot->prefilter_view) != VK_SUCCESS) {
-			vmaDestroyImage(a, slot->prefilter_image, slot->prefilter_alloc);
-			slot->prefilter_image = VK_NULL_HANDLE;
-			slot->prefilter_alloc = {};
-			logger::error("bake_prefilter: vkCreateImageView (full) failed");
-			return false;
-		}
-
-		// per-mip storage views (VIEW_TYPE_CUBE, single mip, 6 layers); transient
-		VkImageView mip_views[PREFILTER_MIP_COUNT] = {};
-		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
-			VkImageViewCreateInfo mvci = full_vci;
-			mvci.subresourceRange.baseMipLevel = m;
-			mvci.subresourceRange.levelCount = 1;
-			if (vkCreateImageView(c.device, &mvci, nullptr, &mip_views[m]) != VK_SUCCESS) {
-				logger::error("bake_prefilter: per-mip view %u creation failed", m);
-				for (u32 j = 0; j < m; j++) vkDestroyImageView(c.device, mip_views[j], nullptr);
-				vkDestroyImageView(c.device, slot->prefilter_view, nullptr);
-				vmaDestroyImage(a, slot->prefilter_image, slot->prefilter_alloc);
-				slot->prefilter_view = VK_NULL_HANDLE;
-				slot->prefilter_image = VK_NULL_HANDLE;
-				slot->prefilter_alloc = {};
-				return false;
-			}
-		}
-
-		// --- transient descriptor pool: one set per mip ---
-		VkDescriptorPoolSize ps[2] = {};
-		ps[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		ps[0].descriptorCount = PREFILTER_MIP_COUNT;
-		ps[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		ps[1].descriptorCount = PREFILTER_MIP_COUNT;
-
-		VkDescriptorPoolCreateInfo pci = {};
-		pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		pci.maxSets = PREFILTER_MIP_COUNT;
-		pci.poolSizeCount = 2;
-		pci.pPoolSizes = ps;
-
-		VkDescriptorPool pool = VK_NULL_HANDLE;
-		vkCreateDescriptorPool(c.device, &pci, nullptr, &pool);
-
-		VkDescriptorSet sets[PREFILTER_MIP_COUNT] = {};
-		VkDescriptorSetLayout layouts[PREFILTER_MIP_COUNT];
-		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) layouts[m] = pref_set_layout;
-
-		VkDescriptorSetAllocateInfo dsai = {};
-		dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsai.descriptorPool = pool;
-		dsai.descriptorSetCount = PREFILTER_MIP_COUNT;
-		dsai.pSetLayouts = layouts;
-		vkAllocateDescriptorSets(c.device, &dsai, sets);
-
-		// Wire each set: same source on binding 0, per-mip storage view on binding 1.
-		VkDescriptorImageInfo src_infos[PREFILTER_MIP_COUNT] = {};
-		VkDescriptorImageInfo dst_infos[PREFILTER_MIP_COUNT] = {};
-		VkWriteDescriptorSet  writes[PREFILTER_MIP_COUNT * 2] = {};
-		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
-			src_infos[m].sampler = ibl_sampler;
-			src_infos[m].imageView = slot->source_view;
-			src_infos[m].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-			dst_infos[m].imageView = mip_views[m];
-			dst_infos[m].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-			writes[m * 2 + 0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[m * 2 + 0].dstSet = sets[m];
-			writes[m * 2 + 0].dstBinding = 0;
-			writes[m * 2 + 0].descriptorCount = 1;
-			writes[m * 2 + 0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			writes[m * 2 + 0].pImageInfo = &src_infos[m];
-
-			writes[m * 2 + 1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[m * 2 + 1].dstSet = sets[m];
-			writes[m * 2 + 1].dstBinding = 1;
-			writes[m * 2 + 1].descriptorCount = 1;
-			writes[m * 2 + 1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-			writes[m * 2 + 1].pImageInfo = &dst_infos[m];
-		}
-		vkUpdateDescriptorSets(c.device, PREFILTER_MIP_COUNT * 2, writes, 0, nullptr);
-
-		// --- record + submit dispatches ---
-		VkCommandPool cmd_pool = VK_NULL_HANDLE;
-		VkCommandBuffer cmd = begin_one_shot(&cmd_pool);
-
-		// Transition the whole prefilter image (all mips, 6 layers) to GENERAL.
-		{
-			VkImageMemoryBarrier b = {};
-			b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			b.image = slot->prefilter_image;
-			b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			b.subresourceRange.baseMipLevel = 0;
-			b.subresourceRange.levelCount = PREFILTER_MIP_COUNT;
-			b.subresourceRange.baseArrayLayer = 0;
-			b.subresourceRange.layerCount = 6;
-			b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-			b.srcAccessMask = 0;
-			b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				0, 0, nullptr, 0, nullptr, 1, &b);
-		}
-
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pref_pipeline);
-
-		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
-			u32 mip_size = PREFILTER_SIZE >> m;
-			f32 roughness = (f32)m / (f32)(PREFILTER_MIP_COUNT - 1);
-
-			PrefilterPC pc = {};
-			pc.roughness = roughness;
-			pc.mip_size  = mip_size;
-			pc.intensity = slot->intensity;
-
-			vkCmdPushConstants(cmd, pref_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
-				0, sizeof(PrefilterPC), &pc);
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pref_pipeline_layout,
-				0, 1, &sets[m], 0, nullptr);
-
-			// dispatch covers mip_size × mip_size × 6 with 8×8×1 workgroups,
-			// rounding up so small mips (size < 8) still get one workgroup per face.
-			u32 groups_xy = (mip_size + 7) / 8;
-			vkCmdDispatch(cmd, groups_xy, groups_xy, 6);
-		}
-
-		// Final transition: all mips, all layers → SHADER_READ_ONLY for sampling.
-		{
-			VkImageMemoryBarrier b = {};
-			b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			b.image = slot->prefilter_image;
-			b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			b.subresourceRange.baseMipLevel = 0;
-			b.subresourceRange.levelCount = PREFILTER_MIP_COUNT;
-			b.subresourceRange.baseArrayLayer = 0;
-			b.subresourceRange.layerCount = 6;
-			b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-			b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			vkCmdPipelineBarrier(cmd,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				0, 0, nullptr, 0, nullptr, 1, &b);
-		}
-
-		end_one_shot(cmd, cmd_pool);
-
-		// Per-mip views are no longer needed once the bake is done; the full
-		// view stays alive on the slot for sampling.
-		for (u32 m = 0; m < PREFILTER_MIP_COUNT; m++) {
-			vkDestroyImageView(c.device, mip_views[m], nullptr);
-		}
-		vkDestroyDescriptorPool(c.device, pool, nullptr);
-
-		slot->ibl_baked = true;
-		return true;
-	}
-
 	// --- public ---
 
 	bool init_ibl() {
@@ -1081,6 +1114,10 @@ namespace vk {
 		// between-frames operation, so the wait is brief.
 		vkDeviceWaitIdle(context().device);
 		write_descriptors();
+	}
+
+	CubemapHandle active_environment() {
+		return active_env;
 	}
 
 	static void destroy_ibl_image(IblImage& img) {

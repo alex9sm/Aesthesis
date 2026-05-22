@@ -15,23 +15,24 @@ namespace vk {
 	bool init_ibl();
 	void shutdown_ibl();
 
-	// Bakes the irradiance cubemap into slot.irradiance_* using the irradiance
-	// compute pipeline. The source cubemap must already be in
-	// SHADER_READ_ONLY_OPTIMAL. Called during vk::load_cubemap before
-	// bake_prefilter; together they populate slot.ibl_baked.
-	bool bake_irradiance(CubemapHandle handle);
+	// Records both the irradiance bake and the per-mip prefilter bakes into a
+	// single command buffer, then submits ASYNCHRONOUSLY (no CPU wait) tied
+	// to slot.bake_fence. Source cubemap must already be in
+	// SHADER_READ_ONLY_OPTIMAL. The slot's `intensity` is applied during
+	// both bakes as an LDR brightness compensation multiplier. On success,
+	// slot.ibl_baked = true and slot.bake_fence / bake_cmd_pool /
+	// bake_desc_pool / bake_pref_mip_views own the transient GPU work.
+	bool bake_ibl(CubemapHandle handle);
 
-	// Bakes the prefiltered specular cubemap (PREFILTER_SIZE base, 5 mips)
-	// into slot.prefilter_* with one compute dispatch per mip, each at the
-	// roughness `mip / (mips - 1)`. The slot's `intensity` is applied as an
-	// LDR brightness compensation multiplier during accumulation. Source must
-	// already be SHADER_READ_ONLY_OPTIMAL. On success, slot.ibl_baked = true.
-	bool bake_prefilter(CubemapHandle handle);
+	// Waits on slot->bake_fence (if any), destroys all transient bake
+	// resources stored on the slot, and nulls them. Idempotent.
+	void release_bake_resources(CubemapSlot* slot);
 
 	// Selects which cubemap drives IBL diffuse (binding 4) + specular
 	// (binding 5). Pure descriptor write across all frames-in-flight.
 	// INVALID_CUBEMAP reverts to neutral placeholders. Must be called outside
 	// begin_frame / end_frame.
-	void set_environment_cubemap(CubemapHandle handle);
+	void          set_environment_cubemap(CubemapHandle handle);
+	CubemapHandle active_environment();
 
 }

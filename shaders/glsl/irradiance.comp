@@ -5,6 +5,10 @@
 layout(set = 0, binding = 0) uniform samplerCube u_source;
 layout(set = 0, binding = 1, rgba16f) uniform imageCube u_irradiance;
 
+layout(push_constant) uniform PC {
+    float intensity;    // per-cubemap LDR brightness multiplier
+} pc;
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 const uint SAMPLES = 1024u;
@@ -51,7 +55,7 @@ void main() {
                     + N * cos_t;
         irradiance += textureLod(u_source, L, 0.0).rgb;
     }
-    irradiance /= float(SAMPLES);
+    irradiance = (irradiance / float(SAMPLES)) * pc.intensity;
 
     imageStore(u_irradiance, tex, vec4(irradiance, 1.0));
 }

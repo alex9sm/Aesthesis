@@ -24,15 +24,15 @@ layout(set = 1, binding = 4) uniform sampler2D t_depth;
 
 layout(push_constant) uniform PC { uint mode; } pc;
 
-// DEBUG_FINAL=0, DEBUG_ALBEDO=1, DEBUG_NORMAL=2, DEBUG_MATERIAL=3, DEBUG_DEPTH=4, DEBUG_HDR_RAW=5
+// DEBUG_FINAL=0, DEBUG_ALBEDO=1, DEBUG_NORMAL=2, DEBUG_MATERIAL=3, DEBUG_DEPTH=4
 void main() {
     vec3 col = vec3(0.0);
 
     if (pc.mode == 0u) {
-        // Reinhard tonemap + gamma 2.2
-        vec3 hdr = texture(t_scene, v_uv).rgb;
-        vec3 mapped = hdr / (1.0 + hdr);
-        col = pow(mapped, vec3(1.0 / 2.2));
+        // Linear scene_hdr clipped to display range. The swapchain attachment
+        // is VK_FORMAT_B8G8R8A8_SRGB, so hardware applies linear->sRGB encoding
+        // on store. No tonemap — values above 1.0 just clip.
+        col = clamp(texture(t_scene, v_uv).rgb, 0.0, 1.0);
     } else if (pc.mode == 1u) {
         col = texture(t_albedo, v_uv).rgb;
     } else if (pc.mode == 2u) {
@@ -43,7 +43,7 @@ void main() {
     } else if (pc.mode == 3u) {
         vec2 m = texture(t_material, v_uv).rg;
         col = vec3(m, 0.0);
-    } else if (pc.mode == 4u) {
+    } else {
         // depth linearized via inv_proj, normalized against the camera's [near, far].
         // gbuffer used a Y-flipped viewport, so NDC.y = 1 - 2*v_uv.y.
         float d = texture(t_depth, v_uv).r;
@@ -55,9 +55,6 @@ void main() {
         float z_far  = g.sun_dir.w;
         float range  = max(z_far - z_near, 1e-6);
         col = vec3(clamp((linear_z - z_near) / range, 0.0, 1.0));
-    } else {
-        // DEBUG_HDR_RAW: raw scene_hdr, clipped to [0,1]
-        col = clamp(texture(t_scene, v_uv).rgb, 0.0, 1.0);
     }
 
     out_color = vec4(col, 1.0);

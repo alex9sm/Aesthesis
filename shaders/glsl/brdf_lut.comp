@@ -1,0 +1,55 @@
+#version 450
+
+#include "include/ibl.glsl"
+
+// RGBA16F because RG16F storage write isn't in Vulkan's mandatory storage
+// image format list; lighting.frag only samples the .rg channels.
+layout(set = 0, binding = 0, rgba16f) uniform image2D out_lut;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+const uint SAMPLES = 1024u;
+
+// Split-sum BRDF integration. For a given (NdotV, roughness), returns the
+// pair (F0_scale, F0_bias) that lighting.frag combines with the prefiltered
+// environment radiance to produce specular IBL.
+vec2 integrate_brdf(float NdotV, float roughness) {
+    vec3 V = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
+    vec3 N = vec3(0.0, 0.0, 1.0);
+
+    float A = 0.0;
+    float B = 0.0;
+
+    for (uint i = 0u; i < SAMPLES; i++) {
+        vec2 Xi = hammersley(i, SAMPLES);
+        vec3 H  = importance_sample_ggx(Xi, N, roughness);
+        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+
+        float NdotL = max(L.z, 0.0);
+        float NdotH = max(H.z, 0.0);
+        float VdotH = max(dot(V, H), 0.0);
+
+        if (NdotL > 0.0) {
+            float G     = geometry_smith_ibl(NdotV, NdotL, roughness);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV);
+            float Fc    = pow(1.0 - VdotH, 5.0);
+
+            A += (1.0 - Fc) * G_Vis;
+            B += Fc * G_Vis;
+        }
+    }
+    return vec2(A, B) / float(SAMPLES);
+}
+
+void main() {
+    ivec2 tex  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(out_lut);
+    if (tex.x >= size.x || tex.y >= size.y) return;
+
+    // u → NdotV, v → roughness; offset to texel center so endpoints aren't 0 or 1.
+    float NdotV     = (float(tex.x) + 0.5) / float(size.x);
+    float roughness = (float(tex.y) + 0.5) / float(size.y);
+
+    vec2 r = integrate_brdf(NdotV, roughness);
+    imageStore(out_lut, tex, vec4(r, 0.0, 1.0));
+}

@@ -19,6 +19,9 @@ namespace renderer {
 	using ModelHandle = u32;
 	static constexpr ModelHandle INVALID_MODEL = (ModelHandle)~0u;
 
+	using CubemapHandle = u32;
+	static constexpr CubemapHandle INVALID_CUBEMAP = (CubemapHandle)~0u;
+
 	// engine-provided reserved texture slots, always populated
 	static constexpr TextureHandle DEFAULT_ALBEDO = 0;  // 1x1 white
 	static constexpr TextureHandle DEFAULT_NORMAL = 1;  // 1x1 flat-normal
@@ -61,6 +64,22 @@ namespace renderer {
 
 	ModelHandle load_model(const char* path);
 	void unload_model(ModelHandle handle);
+
+	// loads 6 PNG faces from assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png.
+	// `intensity` is a per-cubemap LDR brightness multiplier applied during the
+	// IBL prefilter bake (Phase F4); ignored at load time, 1.0 = neutral.
+	// load_cubemap also bakes diffuse irradiance for use as an environment.
+	// Must be called outside begin_frame / end_frame.
+	CubemapHandle load_cubemap(const char* name, f32 intensity = 1.0f);
+	void          unload_cubemap(CubemapHandle handle);
+
+	// IBL environment selection. set_environment_cubemap drives the diffuse
+	// (and, from Phase F4, specular) IBL terms in the lighting pass. Pure
+	// descriptor swap — no GPU work. Pass INVALID_CUBEMAP / call the clear
+	// variant to revert to neutral mid-grey placeholders.
+	// Conventionally called between frames; ownership is not transferred.
+	void set_environment_cubemap(CubemapHandle handle);
+	void clear_environment_cubemap();
 
 	// lighting (persistent state; set whenever the scene changes it)
 	void set_sun(vec3 direction, vec3 color, f32 intensity);

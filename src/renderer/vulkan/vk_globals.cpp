@@ -30,7 +30,10 @@ namespace vk {
 		// binding 1: Instance SSBO
 		// binding 2: Material SSBO
 		// binding 3: bindless textures[MAX_TEXTURES]
-		VkDescriptorSetLayoutBinding bindings[4] = {};
+		// binding 4: IBL irradiance cubemap
+		// binding 5: IBL prefiltered specular cubemap
+		// binding 6: BRDF LUT (2D)
+		VkDescriptorSetLayoutBinding bindings[7] = {};
 		bindings[0].binding = 0;
 		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		bindings[0].descriptorCount = 1;
@@ -51,24 +54,34 @@ namespace vk {
 		bindings[3].descriptorCount = MAX_TEXTURES;
 		bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
+		for (u32 b = 4; b <= 6; b++) {
+			bindings[b].binding = b;
+			bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			bindings[b].descriptorCount = 1;
+			bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		}
+
 		// only binding 3 (the texture array) is partially bound; the others
 		// are always populated.
-		VkDescriptorBindingFlags binding_flags[4] = {
+		VkDescriptorBindingFlags binding_flags[7] = {
 			0,
 			0,
 			0,
 			VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
+			0,
+			0,
+			0,
 		};
 
 		VkDescriptorSetLayoutBindingFlagsCreateInfo flags_ci = {};
 		flags_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-		flags_ci.bindingCount = 4;
+		flags_ci.bindingCount = 7;
 		flags_ci.pBindingFlags = binding_flags;
 
 		VkDescriptorSetLayoutCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		ci.pNext = &flags_ci;
-		ci.bindingCount = 4;
+		ci.bindingCount = 7;
 		ci.pBindings = bindings;
 
 		if (vkCreateDescriptorSetLayout(c.device, &ci, nullptr, &set_layout) != VK_SUCCESS) {
@@ -87,8 +100,9 @@ namespace vk {
 		// bindings 1 (instance SSBO) and 2 (material SSBO) are both storage buffers.
 		sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		sizes[1].descriptorCount = 2 * FRAMES_IN_FLIGHT;
+		// binding 3 (bindless textures) + bindings 4,5,6 (irradiance, prefilter, brdf LUT)
 		sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[2].descriptorCount = MAX_TEXTURES * FRAMES_IN_FLIGHT;
+		sizes[2].descriptorCount = (MAX_TEXTURES + 3) * FRAMES_IN_FLIGHT;
 
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

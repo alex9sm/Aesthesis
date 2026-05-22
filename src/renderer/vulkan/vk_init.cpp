@@ -7,7 +7,9 @@
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
 #include "vk_texture.hpp"
+#include "vk_cubemap.hpp"
 #include "vk_material.hpp"
+#include "vk_ibl.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
@@ -220,7 +222,9 @@ namespace vk {
 		if (!init_globals()) return false;
 		if (!init_instances()) return false;
 		if (!init_textures()) return false;
+		if (!init_cubemaps()) return false;
 		if (!init_materials()) return false;
+		if (!init_ibl()) return false;
 		if (!init_gbuffer()) return false;
 		if (!init_lighting()) return false;
 		if (!init_debug()) return false;
@@ -237,7 +241,9 @@ namespace vk {
 			shutdown_debug();
 			shutdown_lighting();
 			shutdown_gbuffer();
+			shutdown_ibl();
 			shutdown_materials();
+			shutdown_cubemaps();
 			shutdown_textures();
 			shutdown_instances();
 			shutdown_globals();

@@ -1,6 +1,7 @@
 #version 450
 
 #include "include/octahedral.glsl"
+#include "include/ibl.glsl"
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
@@ -15,6 +16,10 @@ layout(set = 0, binding = 0) uniform Globals {
     vec4 sun_color;
     vec4 viewport_size;
 } g;
+
+// set 0 bindings 4/5/6 = IBL (irradiance / prefilter / BRDF LUT). Prefilter
+// + BRDF LUT remain placeholders here until Phase F4 wires specular IBL.
+layout(set = 0, binding = 4) uniform samplerCube t_irradiance;
 
 layout(set = 1, binding = 0) uniform sampler2D t_albedo;
 layout(set = 1, binding = 1) uniform sampler2D t_normal;
@@ -92,8 +97,17 @@ void main() {
     vec3 radiance = g.sun_color.rgb * g.sun_color.w;
     vec3 direct   = (diffuse + spec) * radiance * NdotL;
 
-    // tiny ambient term, gated by baked AO (no IBL yet)
-    vec3 ambient = vec3(0.03) * albedo * ao;
+    // --- diffuse IBL (Phase F3) ---
+    // Irradiance is baked as (Σ L)/N from cosine-weighted importance sampling,
+    // which absorbs the (1/pi) Lambertian factor; multiplying by albedo is
+    // energy-correct without an extra pi divide. Specular IBL still pending
+    // until Phase F4 — until then the ambient term is diffuse-only.
+    vec3 irradiance = texture(t_irradiance, N).rgb;
+    vec3 kS_ibl     = fresnel_schlick_roughness(NdotV, F0, roughness);
+    vec3 kD_ibl     = (vec3(1.0) - kS_ibl) * (1.0 - metallic);
+    vec3 diffuse_ibl = kD_ibl * irradiance * albedo;
+
+    vec3 ambient = diffuse_ibl * ao;
 
     out_color = vec4(direct + ambient, 1.0);
 }

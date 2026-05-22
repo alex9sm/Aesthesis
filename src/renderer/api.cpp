@@ -9,6 +9,8 @@
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
 #include "vk_texture.hpp"
+#include "vk_cubemap.hpp"
+#include "vk_ibl.hpp"
 #include "vk_material.hpp"
 #include "vk_swapchain.hpp"
 #include "memory.hpp"
@@ -109,6 +111,24 @@ namespace renderer {
 
 	void unload_texture(TextureHandle handle) {
 		vk::unload_texture(handle);
+	}
+
+	// --- cubemaps ---
+
+	CubemapHandle load_cubemap(const char* name, f32 intensity) {
+		return vk::load_cubemap(name, intensity);
+	}
+
+	void unload_cubemap(CubemapHandle handle) {
+		vk::unload_cubemap(handle);
+	}
+
+	void set_environment_cubemap(CubemapHandle handle) {
+		vk::set_environment_cubemap(handle);
+	}
+
+	void clear_environment_cubemap() {
+		vk::set_environment_cubemap(vk::INVALID_CUBEMAP);
 	}
 
 	// --- materials ---

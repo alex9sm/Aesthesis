@@ -54,6 +54,27 @@ namespace renderer {
 			vertices[i].position = { p[0], p[1], p[2] };
 		}
 
+		// AABB: prefer the POSITION accessor's min/max (exact, free). fall back
+		// to scanning vertex positions when the exporter omitted them.
+		if (pos_attr->data->has_min && pos_attr->data->has_max) {
+			out->aabb_min = { pos_attr->data->min[0], pos_attr->data->min[1], pos_attr->data->min[2] };
+			out->aabb_max = { pos_attr->data->max[0], pos_attr->data->max[1], pos_attr->data->max[2] };
+		} else if (vertex_count > 0) {
+			vec3 lo = vertices[0].position;
+			vec3 hi = lo;
+			for (u32 i = 1; i < vertex_count; i++) {
+				vec3 p = vertices[i].position;
+				if (p.x < lo.x) lo.x = p.x; if (p.x > hi.x) hi.x = p.x;
+				if (p.y < lo.y) lo.y = p.y; if (p.y > hi.y) hi.y = p.y;
+				if (p.z < lo.z) lo.z = p.z; if (p.z > hi.z) hi.z = p.z;
+			}
+			out->aabb_min = lo;
+			out->aabb_max = hi;
+		} else {
+			out->aabb_min = { 0, 0, 0 };
+			out->aabb_max = { 0, 0, 0 };
+		}
+
 		if (nrm_attr && nrm_attr->data->count == vertex_count) {
 			for (u32 i = 0; i < vertex_count; i++) {
 				f32 n[3] = {};

@@ -17,6 +17,8 @@ namespace renderer {
 		u32 vertex_count;
 		u32* indices;
 		u32 index_count;
+		vec3 aabb_min;   // local-space bounds derived from POSITION accessor
+		vec3 aabb_max;
 	};
 
 	// loads the first primitive of the first mesh from the .glb/.gltf at `path`.

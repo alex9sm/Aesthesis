@@ -1,6 +1,7 @@
 #include "api.hpp"
 #include "gltf.hpp"
 #include "font.hpp"
+#include "frustum.hpp"
 #include "vk_init.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
@@ -355,6 +356,24 @@ namespace renderer {
 
 		VkCommandBuffer cmd = vk::current_cmd();
 		u32 image_index = vk::current_swapchain_image();
+
+		// --- frustum cull ---
+		//
+		// Compact draw_queue in place: anything whose world AABB falls outside
+		// the camera frustum is dropped before the counting sort runs. Unknown
+		// mesh handles are also dropped here, which simplifies the sort
+		// (no need to re-check validity downstream).
+		{
+			Frustum f = build_frustum(frame_view, frame_projection);
+			u32 w = 0;
+			for (u32 r = 0; r < draw_count; r++) {
+				if (cull_test(f, draw_queue[r].mesh, draw_queue[r].model)) {
+					if (w != r) draw_queue[w] = draw_queue[r];
+					w++;
+				}
+			}
+			draw_count = w;
+		}
 
 		// --- mesh-first stable sort ---
 		//

@@ -20,6 +20,7 @@ namespace vk {
 		VmaAllocation index_alloc;
 		u32 vertex_count;
 		u32 index_count;
+		AABB local_aabb;
 	};
 
 	bool init_meshes();

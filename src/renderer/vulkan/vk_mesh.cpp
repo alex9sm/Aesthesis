@@ -142,6 +142,7 @@ namespace vk {
 
 		m.vertex_count = data.vertex_count;
 		m.index_count = data.index_count;
+		m.local_aabb = { data.aabb_min, data.aabb_max };
 		return slot;
 	}
 

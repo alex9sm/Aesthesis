@@ -11,6 +11,7 @@
 #include "vk_cubemap.hpp"
 #include "vk_material.hpp"
 #include "vk_ibl.hpp"
+#include "vk_depth_prepass.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
@@ -227,6 +228,7 @@ namespace vk {
 		if (!init_cubemaps()) return false;
 		if (!init_materials()) return false;
 		if (!init_ibl()) return false;
+		if (!init_depth_prepass()) return false;
 		if (!init_gbuffer()) return false;
 		if (!init_lighting()) return false;
 		if (!init_debug()) return false;
@@ -245,6 +247,7 @@ namespace vk {
 			shutdown_debug();
 			shutdown_lighting();
 			shutdown_gbuffer();
+			shutdown_depth_prepass();
 			shutdown_cubemaps();
 			shutdown_ibl();
 			shutdown_materials();

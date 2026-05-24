@@ -339,8 +339,8 @@ namespace vk {
 			return INVALID_CUBEMAP;
 		}
 
-		logger::info("Loaded cubemap '%s' [%u]: %ux%u, %u mips, intensity=%.2f",
-			name, slot, cm.size, cm.size, cm.mip_levels, intensity);
+		//logger::info("Loaded cubemap '%s' [%u]: %ux%u, %u mips, intensity=%.2f",
+			//name, slot, cm.size, cm.size, cm.mip_levels, intensity);
 		return slot;
 	}
 

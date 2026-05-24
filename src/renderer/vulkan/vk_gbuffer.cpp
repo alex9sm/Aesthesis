@@ -92,11 +92,14 @@ namespace vk {
 		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+		// depth pre-pass already filled the depth buffer with LESS; here we
+		// only want to shade the fragments that survived. EQUAL test + no
+		// writes guarantees zero overdraw in the fragment shader.
 		VkPipelineDepthStencilStateCreateInfo ds = {};
 		ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 		ds.depthTestEnable = VK_TRUE;
-		ds.depthWriteEnable = VK_TRUE;
-		ds.depthCompareOp = VK_COMPARE_OP_LESS;
+		ds.depthWriteEnable = VK_FALSE;
+		ds.depthCompareOp = VK_COMPARE_OP_EQUAL;
 
 		// three color attachments, no blending
 		VkPipelineColorBlendAttachmentState cb_attachments[3] = {};
@@ -192,12 +195,13 @@ namespace vk {
 	{
 		Targets& t = targets();
 
-		// reset layouts at the top of each frame so transitions begin from a known state.
-		// (the targets persist across frames; we discard contents by transitioning from UNDEFINED.)
+		// reset color layouts at the top of each frame so transitions begin
+		// from a known state. depth is owned by the prepass: it already sits
+		// in DEPTH_ATTACHMENT_OPTIMAL with the prepass's write barrier
+		// resolved, so we leave its `layout` field alone here.
 		t.albedo.layout   = VK_IMAGE_LAYOUT_UNDEFINED;
 		t.normal.layout   = VK_IMAGE_LAYOUT_UNDEFINED;
 		t.material.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-		t.depth.layout    = VK_IMAGE_LAYOUT_UNDEFINED;
 
 		transition_image(cmd, t.albedo, VK_IMAGE_ASPECT_COLOR_BIT,
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -211,10 +215,8 @@ namespace vk {
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-		transition_image(cmd, t.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
-			VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
+		// depth: prepass already issued WRITE→READ; depth is in
+		// DEPTH_ATTACHMENT_OPTIMAL and ready to be read+tested.
 
 		// rendering attachments
 		VkRenderingAttachmentInfo color_attachments[3] = {};
@@ -241,13 +243,14 @@ namespace vk {
 		color_attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		color_attachments[2].clearValue.color = { { 0.0f, 0.5f, 0.0f, 0.0f } };
 
+		// LOAD the depth filled by the prepass; STORE so the lighting pass
+		// can still sample it. No clearValue needed for LOAD.
 		VkRenderingAttachmentInfo depth_attachment = {};
 		depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		depth_attachment.imageView = t.depth.view;
 		depth_attachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-		depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		depth_attachment.clearValue.depthStencil = { 1.0f, 0 };
 
 		VkRenderingInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -309,9 +312,11 @@ namespace vk {
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		// gbuffer didn't write depth (EQUAL test + no-write); src_access is
+		// READ. lighting now samples it as a regular texture.
 		transition_image(cmd, t.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
 			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 	}
 

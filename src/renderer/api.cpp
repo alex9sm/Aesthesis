@@ -5,6 +5,7 @@
 #include "vk_init.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
+#include "vk_depth_prepass.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
 #include "vk_debug.hpp"
@@ -432,7 +433,8 @@ namespace renderer {
 			run_start = run_end;
 		}
 
-		vk::execute_gbuffer_pass(cmd, batches, batch_count);
+		vk::execute_depth_prepass(cmd, batches, batch_count);
+		//vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);
 		vk::execute_debug_pass(cmd, image_index, g_debug_mode);
 		vk::execute_overlay_pass(cmd, image_index);

@@ -1,3 +1,5 @@
+#include "vk_pch.hpp"
+
 // stb_image uses fopen/sscanf etc. which MSVC flags as deprecated.
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS

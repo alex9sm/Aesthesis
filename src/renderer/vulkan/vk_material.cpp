@@ -1,3 +1,4 @@
+#include "vk_pch.hpp"
 #include "vk_material.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"

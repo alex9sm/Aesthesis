@@ -53,7 +53,8 @@ void main() {
         vec3  L     = T * (cos(phi) * sin_t)
                     + B * (sin(phi) * sin_t)
                     + N * cos_t;
-        irradiance += textureLod(u_source, L, 0.0).rgb;
+        vec3 Ls = vec3(L.x, -L.z, L.y);
+        irradiance += textureLod(u_source, Ls, 0.0).rgb;
     }
     irradiance = (irradiance / float(SAMPLES)) * pc.intensity;
 

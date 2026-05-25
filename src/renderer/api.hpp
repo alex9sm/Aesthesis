@@ -96,7 +96,7 @@ namespace renderer {
 	void begin_frame(const mat4& view, const mat4& projection);
 	void submit_mesh(MeshHandle mesh, MaterialHandle material,
 		const mat4& model, vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
-	void submit_model(ModelHandle model, const mat4& transform,
+	void submit_model(ModelHandle model, const mat4& transform = mat4_identity(),
 		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
 	void end_frame();
 

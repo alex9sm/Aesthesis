@@ -434,7 +434,7 @@ namespace renderer {
 		}
 
 		vk::execute_depth_prepass(cmd, batches, batch_count);
-		//vk::execute_gbuffer_pass(cmd, batches, batch_count);
+		vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);
 		vk::execute_debug_pass(cmd, image_index, g_debug_mode);
 		vk::execute_overlay_pass(cmd, image_index);

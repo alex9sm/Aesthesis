@@ -92,6 +92,9 @@ namespace renderer {
 	// lighting (persistent state; set whenever the scene changes it)
 	void set_sun(vec3 direction, vec3 color, f32 intensity);
 
+	// submit a point light for this frame. call between begin_frame/end_frame.
+	void submit_light(vec3 position, vec3 color, f32 radius, f32 intensity);
+
 	// frame
 	void begin_frame(const mat4& view, const mat4& projection);
 	void submit_mesh(MeshHandle mesh, MaterialHandle material,

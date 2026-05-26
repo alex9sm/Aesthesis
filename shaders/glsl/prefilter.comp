@@ -54,7 +54,7 @@ void main() {
         if (NdotL > 0.0) {
             // textureLod with mip 0 — could be improved with the
             // Křivánek/Colbert mip-selection trick, but mip 0 is correct.
-            vec3 Ls = vec3(L.x, L.z, -L.y);
+            vec3 Ls = vec3(L.x, -L.z, L.y);
             prefiltered += textureLod(u_source, Ls, 0.0).rgb * NdotL;
             total_weight += NdotL;
         }

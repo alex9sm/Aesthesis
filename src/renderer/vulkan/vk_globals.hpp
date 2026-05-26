@@ -17,11 +17,13 @@ namespace vk {
 		vec4 sun_dir;        // xyz world-space direction TO light; w = z_far
 		vec4 sun_color;      // rgb radiance; w intensity multiplier
 		vec4 viewport_size;  // x=width, y=height, z=1/w, w=1/h
+		vec4 misc;           // x=point_light_count (as float), y/z/w reserved
 	};
 
 	bool init_globals();
 	void shutdown_globals();
 	void update_globals(const GlobalUBO& data);
+	void patch_globals_misc(const vec4& misc);
 
 	VkDescriptorSetLayout global_set_layout();
 	VkDescriptorSet       current_global_set();

@@ -15,12 +15,22 @@ layout(set = 0, binding = 0) uniform Globals {
     vec4 sun_dir;
     vec4 sun_color;
     vec4 viewport_size;
+    vec4 misc;           // x = point_light_count
 } g;
+
+struct PointLight {
+    vec4 position_radius;   // xyz = world pos, w = radius
+    vec4 color_intensity;   // rgb = color, w = intensity
+};
 
 // set 0 bindings 4/5/6 = IBL: diffuse irradiance, prefiltered specular, BRDF LUT.
 layout(set = 0, binding = 4) uniform samplerCube t_irradiance;
 layout(set = 0, binding = 5) uniform samplerCube t_prefilter;
 layout(set = 0, binding = 6) uniform sampler2D   t_brdf_lut;
+
+layout(set = 0, binding = 7, std430) readonly buffer Lights {
+    PointLight lights[];
+} light_buf;
 
 layout(set = 1, binding = 0) uniform sampler2D t_albedo;
 layout(set = 1, binding = 1) uniform sampler2D t_normal;
@@ -97,6 +107,41 @@ void main() {
 
     vec3 radiance = g.sun_color.rgb * g.sun_color.w;
     vec3 direct   = (diffuse + spec) * radiance * NdotL;
+
+    // --- point lights ---
+    uint num_lights = uint(g.misc.x);
+    for (uint i = 0; i < num_lights; i++) {
+        vec3  lpos   = light_buf.lights[i].position_radius.xyz;
+        float radius = light_buf.lights[i].position_radius.w;
+        vec3  lcol   = light_buf.lights[i].color_intensity.rgb;
+        float lint    = light_buf.lights[i].color_intensity.w;
+
+        vec3  Lp     = lpos - P;
+        float dist2  = dot(Lp, Lp);
+        float dist   = sqrt(dist2);
+        vec3  Ll     = Lp / max(dist, 1e-4);
+
+        // UE4-style smooth inverse-square attenuation with radius cutoff
+        float r2     = radius * radius;
+        float win    = clamp(1.0 - (dist2 / r2), 0.0, 1.0);
+        float att    = (win * win) / max(dist2, 1e-4);
+
+        vec3  Hl     = normalize(V + Ll);
+        float pNdotL = max(dot(N, Ll), 0.0);
+        float pNdotH = max(dot(N, Hl), 0.0);
+        float pVdotH = max(dot(V, Hl), 0.0);
+
+        vec3  pF   = fresnel_schlick(pVdotH, F0);
+        float pNDF = ndf_ggx(pNdotH, roughness);
+        float pG   = geo_smith(NdotV, pNdotL, roughness);
+
+        vec3 pSpec = (pNDF * pG * pF) / max(4.0 * pNdotL * NdotV, 1e-4);
+        vec3 pkD   = (vec3(1.0) - pF) * (1.0 - metallic);
+        vec3 pDiff = pkD * albedo / PI;
+
+        vec3 pRad  = lcol * lint * att;
+        direct    += (pDiff + pSpec) * pRad * pNdotL;
+    }
 
     // --- IBL ambient (Phase F3 diffuse + Phase F4 specular, split-sum) ---
     // Irradiance is baked as (Σ L)/N from cosine-weighted importance sampling,

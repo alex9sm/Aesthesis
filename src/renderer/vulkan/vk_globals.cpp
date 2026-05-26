@@ -34,7 +34,8 @@ namespace vk {
 		// binding 4: IBL irradiance cubemap
 		// binding 5: IBL prefiltered specular cubemap
 		// binding 6: BRDF LUT (2D)
-		VkDescriptorSetLayoutBinding bindings[7] = {};
+		// binding 7: Point lights SSBO
+		VkDescriptorSetLayoutBinding bindings[8] = {};
 		bindings[0].binding = 0;
 		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		bindings[0].descriptorCount = 1;
@@ -62,9 +63,14 @@ namespace vk {
 			bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		}
 
+		bindings[7].binding = 7;
+		bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		bindings[7].descriptorCount = 1;
+		bindings[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
 		// only binding 3 (the texture array) is partially bound; the others
 		// are always populated.
-		VkDescriptorBindingFlags binding_flags[7] = {
+		VkDescriptorBindingFlags binding_flags[8] = {
 			0,
 			0,
 			0,
@@ -72,17 +78,18 @@ namespace vk {
 			0,
 			0,
 			0,
+			0,
 		};
 
 		VkDescriptorSetLayoutBindingFlagsCreateInfo flags_ci = {};
 		flags_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-		flags_ci.bindingCount = 7;
+		flags_ci.bindingCount = 8;
 		flags_ci.pBindingFlags = binding_flags;
 
 		VkDescriptorSetLayoutCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		ci.pNext = &flags_ci;
-		ci.bindingCount = 7;
+		ci.bindingCount = 8;
 		ci.pBindings = bindings;
 
 		if (vkCreateDescriptorSetLayout(c.device, &ci, nullptr, &set_layout) != VK_SUCCESS) {
@@ -98,9 +105,9 @@ namespace vk {
 		VkDescriptorPoolSize sizes[3] = {};
 		sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		sizes[0].descriptorCount = FRAMES_IN_FLIGHT;
-		// bindings 1 (instance SSBO) and 2 (material SSBO) are both storage buffers.
+		// bindings 1 (instance SSBO), 2 (material SSBO) and 7 (lights SSBO).
 		sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		sizes[1].descriptorCount = 2 * FRAMES_IN_FLIGHT;
+		sizes[1].descriptorCount = 3 * FRAMES_IN_FLIGHT;
 		// binding 3 (bindless textures) + bindings 4,5,6 (irradiance, prefilter, brdf LUT)
 		sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		sizes[2].descriptorCount = (MAX_TEXTURES + 3) * FRAMES_IN_FLIGHT;
@@ -201,6 +208,12 @@ namespace vk {
 	void update_globals(const GlobalUBO& data) {
 		u32 i = current_frame_index();
 		memory::copy(ubos[i].mapped, &data, sizeof(GlobalUBO));
+	}
+
+	void patch_globals_misc(const vec4& misc) {
+		u32 i = current_frame_index();
+		GlobalUBO* ubo = (GlobalUBO*)ubos[i].mapped;
+		ubo->misc = misc;
 	}
 
 }

@@ -12,6 +12,7 @@
 #include "vk_draw2d.hpp"
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
+#include "vk_lights.hpp"
 #include "vk_texture.hpp"
 #include "vk_cubemap.hpp"
 #include "vk_ibl.hpp"
@@ -298,6 +299,14 @@ namespace renderer {
 		g_sun_intensity = intensity;
 	}
 
+	void submit_light(vec3 position, vec3 color, f32 radius, f32 intensity) {
+		if (!frame_active) return;
+		vk::PointLightGPU light = {};
+		light.position_radius = { position.x, position.y, position.z, radius };
+		light.color_intensity = { color.x, color.y, color.z, intensity };
+		vk::push_light(light);
+	}
+
 	// --- frame ---
 
 	void begin_frame(const mat4& view, const mat4& projection) {
@@ -307,6 +316,8 @@ namespace renderer {
 		frame_active = vk::begin_frame();
 
 		if (frame_active) {
+			vk::reset_lights();
+
 			vk::Swapchain& sc = vk::swapchain();
 
 			vk::GlobalUBO g = {};
@@ -326,6 +337,8 @@ namespace renderer {
 			f32 w = (f32)sc.extent.width;
 			f32 h = (f32)sc.extent.height;
 			g.viewport_size = { w, h, w > 0 ? 1.0f / w : 0.0f, h > 0 ? 1.0f / h : 0.0f };
+
+			g.misc = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 			vk::update_globals(g);
 		}
@@ -432,6 +445,10 @@ namespace renderer {
 			batches[batch_count++] = { run_mesh, run_start, run_end - run_start };
 			run_start = run_end;
 		}
+
+		// patch the point light count into the UBO now that all submit_light
+		// calls have been made (the UBO was uploaded before lights were pushed).
+		vk::patch_globals_misc({ (f32)vk::light_count(), 0.0f, 0.0f, 0.0f });
 
 		vk::execute_depth_prepass(cmd, batches, batch_count);
 		vk::execute_gbuffer_pass(cmd, batches, batch_count);

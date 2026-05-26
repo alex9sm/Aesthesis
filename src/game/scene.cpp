@@ -6,7 +6,7 @@
 namespace scene {
 
 	static renderer::ModelHandle   helmet     = renderer::INVALID_MODEL;
-	static renderer::ModelHandle   sponza = renderer::INVALID_MODEL;
+	static renderer::ModelHandle   chess = renderer::INVALID_MODEL;
 	static renderer::CubemapHandle env_cubemap    = renderer::INVALID_CUBEMAP;
 	static renderer::FontHandle    hud_font       = renderer::INVALID_FONT;
 
@@ -18,11 +18,10 @@ namespace scene {
 
 	bool init() {
 		helmet = renderer::load_model("assets/models/damagedhelmet/DamagedHelmet.gltf");
-		sponza = renderer::load_model("assets/models/sponza/Sponza.gltf");
+		chess = renderer::load_model("assets/models/chess/chess.gltf");
 
-		// directional sun: up and slightly forward/right of the origin.
-		renderer::set_sun({ -0.5f, 1.0f, -0.3f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
-		env_cubemap = renderer::load_cubemap("whitestudio", 4.0f);
+		renderer::set_sun({ 0.38f, 1.0f, 0.41f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
+		env_cubemap = renderer::load_cubemap("field", 0.0f);
 		if (env_cubemap != renderer::INVALID_CUBEMAP) {
 			renderer::set_environment_cubemap(env_cubemap);
 		}
@@ -43,13 +42,18 @@ namespace scene {
 			renderer::unload_cubemap(env_cubemap);
 		}
 		renderer::unload_model(helmet);
-		renderer::unload_model(sponza);
+		renderer::unload_model(chess);
 	}
 
 	void submit(f32 dt) {
 
-		renderer::submit_model(helmet);
-		renderer::submit_model(sponza);
+		renderer::submit_model(helmet, mat4_translate({ 0.0f, 3.0f, 0.0f }));
+		renderer::submit_model(chess);
+
+		// test point lights
+		renderer::submit_light({ 4.0f, 4.0f, 0.0f },  { 1.0f, 0.3f, 0.1f }, 10.0f, 30.0f);
+		renderer::submit_light({-4.0f, 4.0f, 0.0f },  { 0.1f, 0.3f, 1.0f }, 10.0f, 30.0f);
+		renderer::submit_light({ 0.0f, 5.0f, 8.0f },  { 0.2f, 1.0f, 0.2f }, 10.0f, 30.0f);
 
 		// --- FPS HUD ---
 		fps_accum_time   += dt;

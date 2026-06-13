@@ -10,10 +10,6 @@ namespace vk {
 	bool init_debug();
 	void shutdown_debug();
 
-	// re-binds gbuffer + scene_hdr image views into the debug descriptor set.
-	// must be called once after init_targets and again after every resize_targets.
-	void debug_refresh_descriptors();
-
 	// composites the selected debug mode onto the swapchain image. leaves the
 	// swapchain image in COLOR_ATTACHMENT_OPTIMAL — the overlay pass handles
 	// the final transition to PRESENT_SRC_KHR.

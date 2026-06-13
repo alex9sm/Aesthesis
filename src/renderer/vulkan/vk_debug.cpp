@@ -13,6 +13,8 @@ namespace vk {
 	static VkDescriptorPool      pool       = VK_NULL_HANDLE;
 	static VkDescriptorSet       set        = VK_NULL_HANDLE;
 	static VkSampler             sampler    = VK_NULL_HANDLE;
+
+	static void debug_refresh_descriptors();
 	static VkPipelineLayout      pipeline_layout = VK_NULL_HANDLE;
 	static VkPipeline            pipeline   = VK_NULL_HANDLE;
 
@@ -112,6 +114,7 @@ namespace vk {
 		if (!create_sampler()) return false;
 		if (!create_descriptor_resources()) return false;
 		if (!create_pipeline()) return false;
+		register_target_consumer(debug_refresh_descriptors);
 		return true;
 	}
 
@@ -130,7 +133,7 @@ namespace vk {
 		sampler = VK_NULL_HANDLE;
 	}
 
-	void debug_refresh_descriptors() {
+	static void debug_refresh_descriptors() {
 		Context& c = context();
 		Targets& t = targets();
 

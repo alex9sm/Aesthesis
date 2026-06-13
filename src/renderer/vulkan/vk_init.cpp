@@ -235,8 +235,7 @@ namespace vk {
 		if (!init_lighting()) return false;
 		if (!init_debug()) return false;
 		if (!init_draw2d()) return false;
-		lighting_refresh_descriptors();
-		debug_refresh_descriptors();
+		refresh_target_consumers();
 
 		logger::info("Vulkan initialized");
 		return true;

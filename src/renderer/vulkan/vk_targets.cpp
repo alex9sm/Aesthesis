@@ -112,6 +112,24 @@ namespace vk {
 		return create_all(extent);
 	}
 
+	// --- resize-callback registry ---
+
+	static constexpr u32 MAX_TARGET_CONSUMERS = 16;
+	static void(*consumers[MAX_TARGET_CONSUMERS])() = {};
+	static u32 consumer_count = 0;
+
+	void register_target_consumer(void(*refresh)()) {
+		if (consumer_count >= MAX_TARGET_CONSUMERS) {
+			logger::error("register_target_consumer: registry full");
+			return;
+		}
+		consumers[consumer_count++] = refresh;
+	}
+
+	void refresh_target_consumers() {
+		for (u32 i = 0; i < consumer_count; i++) consumers[i]();
+	}
+
 	// --- barrier state machine ---
 
 	struct StateInfo {

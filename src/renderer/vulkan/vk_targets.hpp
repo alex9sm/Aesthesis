@@ -42,6 +42,12 @@ namespace vk {
 
 	Targets& targets();
 
+	// resize-callback registry: passes that sample render targets register a
+	// refresh hook (rewrites their descriptor sets) at init. recreate_swapchain
+	// runs them after resize_targets, so swapchain code never names a pass.
+	void register_target_consumer(void(*refresh)());
+	void refresh_target_consumers();
+
 	// transition a tracked image to a new state. old state, layouts, access
 	// and stage masks are all derived from img.state -> new_state.
 	void transition(VkCommandBuffer cmd, RenderImage& img, ResState new_state);

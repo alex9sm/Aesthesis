@@ -1,3 +1,5 @@
+#include "vk_pch.hpp"
+
 #include "frustum.hpp"
 #include "vk_mesh.hpp"
 

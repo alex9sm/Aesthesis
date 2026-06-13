@@ -1,3 +1,5 @@
+#include "vk_pch.hpp"
+
 #include "api.hpp"
 #include "gltf.hpp"
 #include "font.hpp"

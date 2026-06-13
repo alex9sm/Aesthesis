@@ -6,7 +6,7 @@
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
 #include "vk_globals.hpp"
-#include "vk_shader.hpp"
+#include "vk_pipeline.hpp"
 #include "log.hpp"
 #include "memory.hpp"
 
@@ -67,25 +67,7 @@ namespace vk {
 	// --- pipeline creation ---
 
 	static bool create_rect_pipeline() {
-		Context& c = context();
 		Swapchain& sc = swapchain();
-
-		VkShaderModule vs = load_shader_module("shaders/spv/draw2d_rect.vert.spv");
-		VkShaderModule fs = load_shader_module("shaders/spv/draw2d_rect.frag.spv");
-		if (!vs || !fs) {
-			logger::fatal("Failed to load draw2d_rect shaders");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stages[2] = {};
-		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stages[0].module = vs;
-		stages[0].pName = "main";
-		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stages[1].module = fs;
-		stages[1].pName = "main";
 
 		VkVertexInputBindingDescription vb = {};
 		vb.binding = 0;
@@ -93,127 +75,29 @@ namespace vk {
 		vb.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
 		VkVertexInputAttributeDescription va[2] = {};
-		va[0].location = 0;
-		va[0].binding = 0;
-		va[0].format = VK_FORMAT_R32G32_SFLOAT;
-		va[0].offset = offsetof(RectVertex, x);
-		va[1].location = 1;
-		va[1].binding = 0;
-		va[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		va[1].offset = offsetof(RectVertex, r);
-
-		VkPipelineVertexInputStateCreateInfo vi = {};
-		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vi.vertexBindingDescriptionCount = 1;
-		vi.pVertexBindingDescriptions = &vb;
-		vi.vertexAttributeDescriptionCount = 2;
-		vi.pVertexAttributeDescriptions = va;
-
-		VkPipelineInputAssemblyStateCreateInfo ia = {};
-		ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-		VkPipelineViewportStateCreateInfo vp = {};
-		vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		vp.viewportCount = 1;
-		vp.scissorCount = 1;
-
-		VkPipelineRasterizationStateCreateInfo rs = {};
-		rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rs.polygonMode = VK_POLYGON_MODE_FILL;
-		rs.cullMode = VK_CULL_MODE_NONE;
-		rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		rs.lineWidth = 1.0f;
-
-		VkPipelineMultisampleStateCreateInfo ms = {};
-		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		VkPipelineColorBlendAttachmentState cba = {};
-		cba.blendEnable = VK_TRUE;
-		cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-		cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		cba.colorBlendOp = VK_BLEND_OP_ADD;
-		cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		cba.alphaBlendOp = VK_BLEND_OP_ADD;
-		cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-			| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-		VkPipelineColorBlendStateCreateInfo cb = {};
-		cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		cb.attachmentCount = 1;
-		cb.pAttachments = &cba;
-
-		VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-		VkPipelineDynamicStateCreateInfo dyn = {};
-		dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dyn.dynamicStateCount = 2;
-		dyn.pDynamicStates = dyn_states;
-
-		VkDescriptorSetLayout layouts[] = { global_set_layout() };
-		VkPipelineLayoutCreateInfo layout_ci = {};
-		layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		layout_ci.setLayoutCount = 1;
-		layout_ci.pSetLayouts = layouts;
-
-		if (vkCreatePipelineLayout(c.device, &layout_ci, nullptr, &rect_layout) != VK_SUCCESS) {
-			logger::fatal("Failed to create draw2d_rect pipeline layout");
-			return false;
-		}
+		va[0].location = 0; va[0].format = VK_FORMAT_R32G32_SFLOAT;       va[0].offset = offsetof(RectVertex, x);
+		va[1].location = 1; va[1].format = VK_FORMAT_R32G32B32A32_SFLOAT; va[1].offset = offsetof(RectVertex, r);
 
 		VkFormat color_format = sc.format;
-		VkPipelineRenderingCreateInfo rendering_ci = {};
-		rendering_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-		rendering_ci.colorAttachmentCount = 1;
-		rendering_ci.pColorAttachmentFormats = &color_format;
+		VkDescriptorSetLayout layouts[] = { global_set_layout() };
 
-		VkGraphicsPipelineCreateInfo pci = {};
-		pci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pci.pNext = &rendering_ci;
-		pci.stageCount = 2;
-		pci.pStages = stages;
-		pci.pVertexInputState = &vi;
-		pci.pInputAssemblyState = &ia;
-		pci.pViewportState = &vp;
-		pci.pRasterizationState = &rs;
-		pci.pMultisampleState = &ms;
-		pci.pColorBlendState = &cb;
-		pci.pDynamicState = &dyn;
-		pci.layout = rect_layout;
+		GraphicsPipelineSpec spec = {};
+		spec.vs_path = "shaders/spv/draw2d_rect.vert.spv";
+		spec.fs_path = "shaders/spv/draw2d_rect.frag.spv";
+		spec.vertex_binding = &vb;
+		spec.vertex_attrs = va;
+		spec.vertex_attr_count = 2;
+		spec.color_formats = &color_format;
+		spec.color_count = 1;
+		spec.blend = BlendMode::AlphaBlend;
+		spec.set_layouts = layouts;
+		spec.set_layout_count = 1;
 
-		VkResult r = vkCreateGraphicsPipelines(c.device, VK_NULL_HANDLE, 1, &pci, nullptr, &rect_pipeline);
-
-		vkDestroyShaderModule(c.device, vs, nullptr);
-		vkDestroyShaderModule(c.device, fs, nullptr);
-
-		if (r != VK_SUCCESS) {
-			logger::fatal("Failed to create draw2d_rect pipeline");
-			return false;
-		}
-		return true;
+		return create_graphics_pipeline(spec, &rect_pipeline, &rect_layout);
 	}
 
 	static bool create_text_pipeline() {
-		Context& c = context();
 		Swapchain& sc = swapchain();
-
-		VkShaderModule vs = load_shader_module("shaders/spv/draw2d_text.vert.spv");
-		VkShaderModule fs = load_shader_module("shaders/spv/draw2d_text.frag.spv");
-		if (!vs || !fs) {
-			logger::fatal("Failed to load draw2d_text shaders");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stages[2] = {};
-		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stages[0].module = vs;
-		stages[0].pName = "main";
-		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stages[1].module = fs;
-		stages[1].pName = "main";
 
 		VkVertexInputBindingDescription vb = {};
 		vb.binding = 0;
@@ -221,116 +105,32 @@ namespace vk {
 		vb.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
 		VkVertexInputAttributeDescription va[3] = {};
-		va[0].location = 0;
-		va[0].binding = 0;
-		va[0].format = VK_FORMAT_R32G32_SFLOAT;
-		va[0].offset = offsetof(TextVertex, x);
-		va[1].location = 1;
-		va[1].binding = 0;
-		va[1].format = VK_FORMAT_R32G32_SFLOAT;
-		va[1].offset = offsetof(TextVertex, u);
-		va[2].location = 2;
-		va[2].binding = 0;
-		va[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		va[2].offset = offsetof(TextVertex, r);
-
-		VkPipelineVertexInputStateCreateInfo vi = {};
-		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vi.vertexBindingDescriptionCount = 1;
-		vi.pVertexBindingDescriptions = &vb;
-		vi.vertexAttributeDescriptionCount = 3;
-		vi.pVertexAttributeDescriptions = va;
-
-		VkPipelineInputAssemblyStateCreateInfo ia = {};
-		ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-		VkPipelineViewportStateCreateInfo vp = {};
-		vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		vp.viewportCount = 1;
-		vp.scissorCount = 1;
-
-		VkPipelineRasterizationStateCreateInfo rs = {};
-		rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rs.polygonMode = VK_POLYGON_MODE_FILL;
-		rs.cullMode = VK_CULL_MODE_NONE;
-		rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		rs.lineWidth = 1.0f;
-
-		VkPipelineMultisampleStateCreateInfo ms = {};
-		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		VkPipelineColorBlendAttachmentState cba = {};
-		cba.blendEnable = VK_TRUE;
-		cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-		cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		cba.colorBlendOp = VK_BLEND_OP_ADD;
-		cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		cba.alphaBlendOp = VK_BLEND_OP_ADD;
-		cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-			| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-		VkPipelineColorBlendStateCreateInfo cb = {};
-		cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		cb.attachmentCount = 1;
-		cb.pAttachments = &cba;
-
-		VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-		VkPipelineDynamicStateCreateInfo dyn = {};
-		dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dyn.dynamicStateCount = 2;
-		dyn.pDynamicStates = dyn_states;
+		va[0].location = 0; va[0].format = VK_FORMAT_R32G32_SFLOAT;       va[0].offset = offsetof(TextVertex, x);
+		va[1].location = 1; va[1].format = VK_FORMAT_R32G32_SFLOAT;       va[1].offset = offsetof(TextVertex, u);
+		va[2].location = 2; va[2].format = VK_FORMAT_R32G32B32A32_SFLOAT; va[2].offset = offsetof(TextVertex, r);
 
 		VkPushConstantRange push_range = {};
 		push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		push_range.offset = 0;
 		push_range.size = sizeof(u32);
 
-		VkDescriptorSetLayout layouts[] = { global_set_layout() };
-		VkPipelineLayoutCreateInfo layout_ci = {};
-		layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		layout_ci.setLayoutCount = 1;
-		layout_ci.pSetLayouts = layouts;
-		layout_ci.pushConstantRangeCount = 1;
-		layout_ci.pPushConstantRanges = &push_range;
-
-		if (vkCreatePipelineLayout(c.device, &layout_ci, nullptr, &text_layout) != VK_SUCCESS) {
-			logger::fatal("Failed to create draw2d_text pipeline layout");
-			return false;
-		}
-
 		VkFormat color_format = sc.format;
-		VkPipelineRenderingCreateInfo rendering_ci = {};
-		rendering_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-		rendering_ci.colorAttachmentCount = 1;
-		rendering_ci.pColorAttachmentFormats = &color_format;
+		VkDescriptorSetLayout layouts[] = { global_set_layout() };
 
-		VkGraphicsPipelineCreateInfo pci = {};
-		pci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pci.pNext = &rendering_ci;
-		pci.stageCount = 2;
-		pci.pStages = stages;
-		pci.pVertexInputState = &vi;
-		pci.pInputAssemblyState = &ia;
-		pci.pViewportState = &vp;
-		pci.pRasterizationState = &rs;
-		pci.pMultisampleState = &ms;
-		pci.pColorBlendState = &cb;
-		pci.pDynamicState = &dyn;
-		pci.layout = text_layout;
+		GraphicsPipelineSpec spec = {};
+		spec.vs_path = "shaders/spv/draw2d_text.vert.spv";
+		spec.fs_path = "shaders/spv/draw2d_text.frag.spv";
+		spec.vertex_binding = &vb;
+		spec.vertex_attrs = va;
+		spec.vertex_attr_count = 3;
+		spec.color_formats = &color_format;
+		spec.color_count = 1;
+		spec.blend = BlendMode::AlphaBlend;
+		spec.set_layouts = layouts;
+		spec.set_layout_count = 1;
+		spec.push_constant = &push_range;
 
-		VkResult r = vkCreateGraphicsPipelines(c.device, VK_NULL_HANDLE, 1, &pci, nullptr, &text_pipeline);
-
-		vkDestroyShaderModule(c.device, vs, nullptr);
-		vkDestroyShaderModule(c.device, fs, nullptr);
-
-		if (r != VK_SUCCESS) {
-			logger::fatal("Failed to create draw2d_text pipeline");
-			return false;
-		}
-		return true;
+		return create_graphics_pipeline(spec, &text_pipeline, &text_layout);
 	}
 
 	static bool create_vertex_buffers() {

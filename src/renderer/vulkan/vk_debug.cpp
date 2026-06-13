@@ -4,7 +4,7 @@
 #include "vk_swapchain.hpp"
 #include "vk_targets.hpp"
 #include "vk_globals.hpp"
-#include "vk_shader.hpp"
+#include "vk_pipeline.hpp"
 #include "log.hpp"
 
 namespace vk {
@@ -85,114 +85,27 @@ namespace vk {
 	}
 
 	static bool create_pipeline() {
-		Context& c = context();
 		Swapchain& sc = swapchain();
 
-		VkShaderModule vs = load_shader_module("shaders/spv/debug.vert.spv");
-		VkShaderModule fs = load_shader_module("shaders/spv/debug.frag.spv");
-		if (!vs || !fs) {
-			logger::fatal("Failed to load debug shaders");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stages[2] = {};
-		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stages[0].module = vs;
-		stages[0].pName = "main";
-		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stages[1].module = fs;
-		stages[1].pName = "main";
-
-		VkPipelineVertexInputStateCreateInfo vi = {};
-		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-		VkPipelineInputAssemblyStateCreateInfo ia = {};
-		ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-		VkPipelineViewportStateCreateInfo vp = {};
-		vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		vp.viewportCount = 1;
-		vp.scissorCount = 1;
-
-		VkPipelineRasterizationStateCreateInfo rs = {};
-		rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rs.polygonMode = VK_POLYGON_MODE_FILL;
-		rs.cullMode = VK_CULL_MODE_NONE;
-		rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		rs.lineWidth = 1.0f;
-
-		VkPipelineMultisampleStateCreateInfo ms = {};
-		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		VkPipelineColorBlendAttachmentState cba = {};
-		cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-			| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-		VkPipelineColorBlendStateCreateInfo cb = {};
-		cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		cb.attachmentCount = 1;
-		cb.pAttachments = &cba;
-
-		VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-		VkPipelineDynamicStateCreateInfo dyn = {};
-		dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dyn.dynamicStateCount = 2;
-		dyn.pDynamicStates = dyn_states;
+		VkFormat color_format = sc.format;
+		VkDescriptorSetLayout layouts[] = { global_set_layout(), set_layout };
 
 		VkPushConstantRange push_range = {};
 		push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		push_range.offset = 0;
 		push_range.size = sizeof(u32);
 
-		VkDescriptorSetLayout layouts[] = { global_set_layout(), set_layout };
+		// fullscreen composite/debug-view blit into the swapchain image.
+		GraphicsPipelineSpec spec = {};
+		spec.vs_path = "shaders/spv/debug.vert.spv";
+		spec.fs_path = "shaders/spv/debug.frag.spv";
+		spec.color_formats = &color_format;
+		spec.color_count = 1;
+		spec.set_layouts = layouts;
+		spec.set_layout_count = 2;
+		spec.push_constant = &push_range;
 
-		VkPipelineLayoutCreateInfo layout_ci = {};
-		layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		layout_ci.setLayoutCount = 2;
-		layout_ci.pSetLayouts = layouts;
-		layout_ci.pushConstantRangeCount = 1;
-		layout_ci.pPushConstantRanges = &push_range;
-
-		if (vkCreatePipelineLayout(c.device, &layout_ci, nullptr, &pipeline_layout) != VK_SUCCESS) {
-			logger::fatal("Failed to create debug pipeline layout");
-			return false;
-		}
-
-		VkFormat color_format = sc.format;
-
-		VkPipelineRenderingCreateInfo rendering_ci = {};
-		rendering_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-		rendering_ci.colorAttachmentCount = 1;
-		rendering_ci.pColorAttachmentFormats = &color_format;
-
-		VkGraphicsPipelineCreateInfo pci = {};
-		pci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pci.pNext = &rendering_ci;
-		pci.stageCount = 2;
-		pci.pStages = stages;
-		pci.pVertexInputState = &vi;
-		pci.pInputAssemblyState = &ia;
-		pci.pViewportState = &vp;
-		pci.pRasterizationState = &rs;
-		pci.pMultisampleState = &ms;
-		pci.pColorBlendState = &cb;
-		pci.pDynamicState = &dyn;
-		pci.layout = pipeline_layout;
-
-		VkResult r = vkCreateGraphicsPipelines(c.device, VK_NULL_HANDLE, 1, &pci, nullptr, &pipeline);
-
-		vkDestroyShaderModule(c.device, vs, nullptr);
-		vkDestroyShaderModule(c.device, fs, nullptr);
-
-		if (r != VK_SUCCESS) {
-			logger::fatal("Failed to create debug pipeline");
-			return false;
-		}
-		return true;
+		return create_graphics_pipeline(spec, &pipeline, &pipeline_layout);
 	}
 
 	bool init_debug() {

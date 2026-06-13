@@ -3,7 +3,7 @@
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
 #include "vk_swapchain.hpp"
-#include "vk_shader.hpp"
+#include "vk_pipeline.hpp"
 #include "vk_targets.hpp"
 #include "vk_globals.hpp"
 #include "vk_frame.hpp"
@@ -21,25 +21,7 @@ namespace vk {
 	// --- pipeline ---
 
 	static bool create_pipeline() {
-		Context& c = context();
 		Targets& t = targets();
-
-		VkShaderModule vs = load_shader_module("shaders/spv/gbuffer.vert.spv");
-		VkShaderModule fs = load_shader_module("shaders/spv/gbuffer.frag.spv");
-		if (!vs || !fs) {
-			logger::fatal("Failed to load gbuffer shaders");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stages[2] = {};
-		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stages[0].module = vs;
-		stages[0].pName = "main";
-		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stages[1].module = fs;
-		stages[1].pName = "main";
 
 		// vertex input: pos / normal / tangent / uv
 		VkVertexInputBindingDescription binding = {};
@@ -48,131 +30,33 @@ namespace vk {
 		binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
 		VkVertexInputAttributeDescription attrs[4] = {};
-		attrs[0].location = 0;
-		attrs[0].binding = 0;
-		attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-		attrs[0].offset = (u32)offsetof(renderer::Vertex, position);
-		attrs[1].location = 1;
-		attrs[1].binding = 0;
-		attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-		attrs[1].offset = (u32)offsetof(renderer::Vertex, normal);
-		attrs[2].location = 2;
-		attrs[2].binding = 0;
-		attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		attrs[2].offset = (u32)offsetof(renderer::Vertex, tangent);
-		attrs[3].location = 3;
-		attrs[3].binding = 0;
-		attrs[3].format = VK_FORMAT_R32G32_SFLOAT;
-		attrs[3].offset = (u32)offsetof(renderer::Vertex, uv);
+		attrs[0].location = 0; attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[0].offset = (u32)offsetof(renderer::Vertex, position);
+		attrs[1].location = 1; attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[1].offset = (u32)offsetof(renderer::Vertex, normal);
+		attrs[2].location = 2; attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrs[2].offset = (u32)offsetof(renderer::Vertex, tangent);
+		attrs[3].location = 3; attrs[3].format = VK_FORMAT_R32G32_SFLOAT;       attrs[3].offset = (u32)offsetof(renderer::Vertex, uv);
 
-		VkPipelineVertexInputStateCreateInfo vi = {};
-		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vi.vertexBindingDescriptionCount = 1;
-		vi.pVertexBindingDescriptions = &binding;
-		vi.vertexAttributeDescriptionCount = 4;
-		vi.pVertexAttributeDescriptions = attrs;
-
-		VkPipelineInputAssemblyStateCreateInfo ia = {};
-		ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-		VkPipelineViewportStateCreateInfo vp = {};
-		vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		vp.viewportCount = 1;
-		vp.scissorCount = 1;
-
-		VkPipelineRasterizationStateCreateInfo rs = {};
-		rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rs.polygonMode = VK_POLYGON_MODE_FILL;
-		rs.cullMode = VK_CULL_MODE_BACK_BIT;
-		rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		rs.lineWidth = 1.0f;
-
-		VkPipelineMultisampleStateCreateInfo ms = {};
-		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		// depth pre-pass already filled the depth buffer with LESS; here we
-		// only want to shade the fragments that survived. EQUAL test + no
-		// writes guarantees zero overdraw in the fragment shader.
-		VkPipelineDepthStencilStateCreateInfo ds = {};
-		ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		ds.depthTestEnable = VK_TRUE;
-		ds.depthWriteEnable = VK_FALSE;
-		ds.depthCompareOp = VK_COMPARE_OP_EQUAL;
-
-		// three color attachments, no blending
-		VkPipelineColorBlendAttachmentState cb_attachments[3] = {};
-		for (int i = 0; i < 3; i++) {
-			cb_attachments[i].colorWriteMask =
-				VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-				VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-			cb_attachments[i].blendEnable = VK_FALSE;
-		}
-
-		VkPipelineColorBlendStateCreateInfo cb = {};
-		cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		cb.attachmentCount = 3;
-		cb.pAttachments = cb_attachments;
-
-		VkDynamicState dyn_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-		VkPipelineDynamicStateCreateInfo dyn = {};
-		dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dyn.dynamicStateCount = 2;
-		dyn.pDynamicStates = dyn_states;
-
+		VkFormat color_formats[3] = { t.albedo.format, t.normal.format, t.material.format };
 		VkDescriptorSetLayout set_layouts[] = { global_set_layout() };
 
-		VkPipelineLayoutCreateInfo layout_ci = {};
-		layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		layout_ci.setLayoutCount = 1;
-		layout_ci.pSetLayouts = set_layouts;
-		layout_ci.pushConstantRangeCount = 0;
-		layout_ci.pPushConstantRanges = nullptr;
+		// depth prepass already filled depth with LESS; here we shade only the
+		// fragments that survived. EQUAL test + no depth write = zero overdraw.
+		GraphicsPipelineSpec spec = {};
+		spec.vs_path = "shaders/spv/gbuffer.vert.spv";
+		spec.fs_path = "shaders/spv/gbuffer.frag.spv";
+		spec.vertex_binding = &binding;
+		spec.vertex_attrs = attrs;
+		spec.vertex_attr_count = 4;
+		spec.cull = VK_CULL_MODE_BACK_BIT;
+		spec.depth_test = VK_TRUE;
+		spec.depth_write = VK_FALSE;
+		spec.depth_compare = VK_COMPARE_OP_EQUAL;
+		spec.color_formats = color_formats;
+		spec.color_count = 3;
+		spec.depth_format = t.depth.format;
+		spec.set_layouts = set_layouts;
+		spec.set_layout_count = 1;
 
-		if (vkCreatePipelineLayout(c.device, &layout_ci, nullptr, &pipeline_layout) != VK_SUCCESS) {
-			logger::fatal("Failed to create pipeline layout");
-			return false;
-		}
-
-		// dynamic rendering: declare attachment formats
-		VkFormat color_formats[3] = {
-			t.albedo.format,
-			t.normal.format,
-			t.material.format,
-		};
-
-		VkPipelineRenderingCreateInfo rendering_ci = {};
-		rendering_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-		rendering_ci.colorAttachmentCount = 3;
-		rendering_ci.pColorAttachmentFormats = color_formats;
-		rendering_ci.depthAttachmentFormat = t.depth.format;
-
-		VkGraphicsPipelineCreateInfo pipeline_ci = {};
-		pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pipeline_ci.pNext = &rendering_ci;
-		pipeline_ci.stageCount = 2;
-		pipeline_ci.pStages = stages;
-		pipeline_ci.pVertexInputState = &vi;
-		pipeline_ci.pInputAssemblyState = &ia;
-		pipeline_ci.pViewportState = &vp;
-		pipeline_ci.pRasterizationState = &rs;
-		pipeline_ci.pMultisampleState = &ms;
-		pipeline_ci.pDepthStencilState = &ds;
-		pipeline_ci.pColorBlendState = &cb;
-		pipeline_ci.pDynamicState = &dyn;
-		pipeline_ci.layout = pipeline_layout;
-
-		VkResult r = vkCreateGraphicsPipelines(c.device, VK_NULL_HANDLE, 1, &pipeline_ci, nullptr, &pipeline);
-
-		vkDestroyShaderModule(c.device, vs, nullptr);
-		vkDestroyShaderModule(c.device, fs, nullptr);
-
-		if (r != VK_SUCCESS) {
-			logger::fatal("Failed to create gbuffer pipeline");
-			return false;
-		}
-		return true;
+		return create_graphics_pipeline(spec, &pipeline, &pipeline_layout);
 	}
 
 	// --- public ---

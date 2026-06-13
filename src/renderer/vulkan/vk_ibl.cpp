@@ -9,7 +9,7 @@
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
 #include "vk_globals.hpp"
-#include "vk_shader.hpp"
+#include "vk_pipeline.hpp"
 #include "vk_mem_alloc.h"
 #include "log.hpp"
 #include "memory.hpp"
@@ -285,12 +285,6 @@ namespace vk {
 	static bool bake_brdf_lut_compute() {
 		Context& c = context();
 
-		VkShaderModule sm = load_shader_module("shaders/spv/brdf_lut.comp.spv");
-		if (!sm) {
-			logger::fatal("Failed to load brdf_lut.comp.spv");
-			return false;
-		}
-
 		// descriptor set layout: single storage image
 		VkDescriptorSetLayoutBinding b = {};
 		b.binding = 0;
@@ -304,43 +298,20 @@ namespace vk {
 		lci.pBindings = &b;
 		VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
 		if (vkCreateDescriptorSetLayout(c.device, &lci, nullptr, &set_layout) != VK_SUCCESS) {
-			vkDestroyShaderModule(c.device, sm, nullptr);
 			logger::fatal("BRDF LUT bake: create descriptor set layout failed");
 			return false;
 		}
 
-		VkPipelineLayoutCreateInfo pli = {};
-		pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pli.setLayoutCount = 1;
-		pli.pSetLayouts = &set_layout;
+		ComputePipelineSpec cspec = {};
+		cspec.cs_path = "shaders/spv/brdf_lut.comp.spv";
+		cspec.set_layouts = &set_layout;
+		cspec.set_layout_count = 1;
 		VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
-		if (vkCreatePipelineLayout(c.device, &pli, nullptr, &pipeline_layout) != VK_SUCCESS) {
-			vkDestroyDescriptorSetLayout(c.device, set_layout, nullptr);
-			vkDestroyShaderModule(c.device, sm, nullptr);
-			logger::fatal("BRDF LUT bake: create pipeline layout failed");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stage = {};
-		stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		stage.module = sm;
-		stage.pName = "main";
-
-		VkComputePipelineCreateInfo cpi = {};
-		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		cpi.stage = stage;
-		cpi.layout = pipeline_layout;
-
 		VkPipeline pipeline = VK_NULL_HANDLE;
-		if (vkCreateComputePipelines(c.device, VK_NULL_HANDLE, 1, &cpi, nullptr, &pipeline) != VK_SUCCESS) {
-			vkDestroyPipelineLayout(c.device, pipeline_layout, nullptr);
+		if (!create_compute_pipeline(cspec, &pipeline, &pipeline_layout)) {
 			vkDestroyDescriptorSetLayout(c.device, set_layout, nullptr);
-			vkDestroyShaderModule(c.device, sm, nullptr);
-			logger::fatal("BRDF LUT bake: create compute pipeline failed");
 			return false;
 		}
-		vkDestroyShaderModule(c.device, sm, nullptr);
 
 		// descriptor pool + set
 		VkDescriptorPoolSize ps = {};
@@ -579,12 +550,6 @@ namespace vk {
 	static bool create_irradiance_pipeline() {
 		Context& c = context();
 
-		VkShaderModule sm = load_shader_module("shaders/spv/irradiance.comp.spv");
-		if (!sm) {
-			logger::fatal("Failed to load irradiance.comp.spv");
-			return false;
-		}
-
 		// binding 0: input samplerCube (source)
 		// binding 1: output imageCube  (irradiance)
 		VkDescriptorSetLayoutBinding bs[2] = {};
@@ -602,7 +567,6 @@ namespace vk {
 		lci.bindingCount = 2;
 		lci.pBindings = bs;
 		if (vkCreateDescriptorSetLayout(c.device, &lci, nullptr, &irr_set_layout) != VK_SUCCESS) {
-			vkDestroyShaderModule(c.device, sm, nullptr);
 			logger::fatal("Failed to create irradiance descriptor set layout");
 			return false;
 		}
@@ -612,33 +576,12 @@ namespace vk {
 		ipcr.offset = 0;
 		ipcr.size = sizeof(IrradiancePC);
 
-		VkPipelineLayoutCreateInfo pli = {};
-		pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pli.setLayoutCount = 1;
-		pli.pSetLayouts = &irr_set_layout;
-		pli.pushConstantRangeCount = 1;
-		pli.pPushConstantRanges = &ipcr;
-		if (vkCreatePipelineLayout(c.device, &pli, nullptr, &irr_pipeline_layout) != VK_SUCCESS) {
-			vkDestroyShaderModule(c.device, sm, nullptr);
-			logger::fatal("Failed to create irradiance pipeline layout");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stage = {};
-		stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		stage.module = sm;
-		stage.pName = "main";
-
-		VkComputePipelineCreateInfo cpi = {};
-		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		cpi.stage = stage;
-		cpi.layout = irr_pipeline_layout;
-
-		VkResult r = vkCreateComputePipelines(c.device, VK_NULL_HANDLE, 1, &cpi, nullptr, &irr_pipeline);
-		vkDestroyShaderModule(c.device, sm, nullptr);
-		if (r != VK_SUCCESS) {
-			logger::fatal("Failed to create irradiance compute pipeline");
+		ComputePipelineSpec cspec = {};
+		cspec.cs_path = "shaders/spv/irradiance.comp.spv";
+		cspec.set_layouts = &irr_set_layout;
+		cspec.set_layout_count = 1;
+		cspec.push_constant = &ipcr;
+		if (!create_compute_pipeline(cspec, &irr_pipeline, &irr_pipeline_layout)) {
 			return false;
 		}
 		return true;
@@ -1012,12 +955,6 @@ namespace vk {
 	static bool create_prefilter_pipeline() {
 		Context& c = context();
 
-		VkShaderModule sm = load_shader_module("shaders/spv/prefilter.comp.spv");
-		if (!sm) {
-			logger::fatal("Failed to load prefilter.comp.spv");
-			return false;
-		}
-
 		// binding 0: input samplerCube (source)
 		// binding 1: output imageCube  (single mip of prefilter)
 		VkDescriptorSetLayoutBinding bs[2] = {};
@@ -1035,7 +972,6 @@ namespace vk {
 		lci.bindingCount = 2;
 		lci.pBindings = bs;
 		if (vkCreateDescriptorSetLayout(c.device, &lci, nullptr, &pref_set_layout) != VK_SUCCESS) {
-			vkDestroyShaderModule(c.device, sm, nullptr);
 			logger::fatal("Failed to create prefilter descriptor set layout");
 			return false;
 		}
@@ -1045,33 +981,12 @@ namespace vk {
 		pcr.offset = 0;
 		pcr.size = sizeof(PrefilterPC);
 
-		VkPipelineLayoutCreateInfo pli = {};
-		pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pli.setLayoutCount = 1;
-		pli.pSetLayouts = &pref_set_layout;
-		pli.pushConstantRangeCount = 1;
-		pli.pPushConstantRanges = &pcr;
-		if (vkCreatePipelineLayout(c.device, &pli, nullptr, &pref_pipeline_layout) != VK_SUCCESS) {
-			vkDestroyShaderModule(c.device, sm, nullptr);
-			logger::fatal("Failed to create prefilter pipeline layout");
-			return false;
-		}
-
-		VkPipelineShaderStageCreateInfo stage = {};
-		stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		stage.module = sm;
-		stage.pName = "main";
-
-		VkComputePipelineCreateInfo cpi = {};
-		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		cpi.stage = stage;
-		cpi.layout = pref_pipeline_layout;
-
-		VkResult r = vkCreateComputePipelines(c.device, VK_NULL_HANDLE, 1, &cpi, nullptr, &pref_pipeline);
-		vkDestroyShaderModule(c.device, sm, nullptr);
-		if (r != VK_SUCCESS) {
-			logger::fatal("Failed to create prefilter compute pipeline");
+		ComputePipelineSpec cspec = {};
+		cspec.cs_path = "shaders/spv/prefilter.comp.spv";
+		cspec.set_layouts = &pref_set_layout;
+		cspec.set_layout_count = 1;
+		cspec.push_constant = &pcr;
+		if (!create_compute_pipeline(cspec, &pref_pipeline, &pref_pipeline_layout)) {
 			return false;
 		}
 		return true;

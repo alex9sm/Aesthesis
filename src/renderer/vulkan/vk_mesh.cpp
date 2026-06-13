@@ -17,13 +17,13 @@ namespace vk {
 
 	void shutdown_meshes() {
 		for (u32 i = 1; i < MAX_MESHES; i++) {
-			if (meshes[i].vertex_buffer) destroy_mesh(i);
+			if (meshes[i].position_buffer) destroy_mesh(i);
 		}
 	}
 
 	static MeshHandle find_free_slot() {
 		for (u32 i = 1; i < MAX_MESHES; i++) {
-			if (meshes[i].vertex_buffer == VK_NULL_HANDLE) return i;
+			if (meshes[i].position_buffer == VK_NULL_HANDLE) return i;
 		}
 		return INVALID_MESH;
 	}
@@ -125,17 +125,26 @@ namespace vk {
 		}
 
 		MeshGPU& m = meshes[slot];
-		VkDeviceSize vb_size = sizeof(renderer::Vertex) * data.vertex_count;
+		VkDeviceSize pos_size = sizeof(vec3) * data.vertex_count;
+		VkDeviceSize attr_size = sizeof(renderer::VertexAttribs) * data.vertex_count;
 		VkDeviceSize ib_size = sizeof(u32) * data.index_count;
 
-		if (!upload_buffer(data.vertices, vb_size,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.vertex_buffer, &m.vertex_alloc)) {
+		if (!upload_buffer(data.positions, pos_size,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.position_buffer, &m.position_alloc)) {
+			return INVALID_MESH;
+		}
+
+		if (!upload_buffer(data.attribs, attr_size,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.attrib_buffer, &m.attrib_alloc)) {
+			vmaDestroyBuffer(allocator(), m.position_buffer, m.position_alloc);
+			m = {};
 			return INVALID_MESH;
 		}
 
 		if (!upload_buffer(data.indices, ib_size,
 			VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &m.index_buffer, &m.index_alloc)) {
-			vmaDestroyBuffer(allocator(), m.vertex_buffer, m.vertex_alloc);
+			vmaDestroyBuffer(allocator(), m.attrib_buffer, m.attrib_alloc);
+			vmaDestroyBuffer(allocator(), m.position_buffer, m.position_alloc);
 			m = {};
 			return INVALID_MESH;
 		}
@@ -150,14 +159,15 @@ namespace vk {
 		if (handle == INVALID_MESH || handle >= MAX_MESHES) return;
 		MeshGPU& m = meshes[handle];
 		VmaAllocator a = allocator();
-		if (m.index_buffer)  vmaDestroyBuffer(a, m.index_buffer, m.index_alloc);
-		if (m.vertex_buffer) vmaDestroyBuffer(a, m.vertex_buffer, m.vertex_alloc);
+		if (m.index_buffer)    vmaDestroyBuffer(a, m.index_buffer, m.index_alloc);
+		if (m.attrib_buffer)   vmaDestroyBuffer(a, m.attrib_buffer, m.attrib_alloc);
+		if (m.position_buffer) vmaDestroyBuffer(a, m.position_buffer, m.position_alloc);
 		m = {};
 	}
 
 	const MeshGPU* get_mesh(MeshHandle handle) {
 		if (handle == INVALID_MESH || handle >= MAX_MESHES) return nullptr;
-		if (meshes[handle].vertex_buffer == VK_NULL_HANDLE) return nullptr;
+		if (meshes[handle].position_buffer == VK_NULL_HANDLE) return nullptr;
 		return &meshes[handle];
 	}
 

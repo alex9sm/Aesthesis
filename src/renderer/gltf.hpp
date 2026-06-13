@@ -5,15 +5,18 @@
 
 namespace renderer {
 
-	struct Vertex {
-		vec3 position;
+	// attribute stream (everything except position). split out from position so
+	// position-only passes (depth prepass, shadow cascades) can bind a tight
+	// 12 B/vertex stream instead of the full 48 B.
+	struct VertexAttribs {
 		vec3 normal;
 		vec4 tangent;   // .xyz tangent, .w bitangent sign (glTF convention)
 		vec2 uv;
 	};
 
 	struct MeshData {
-		Vertex* vertices;
+		vec3*          positions;   // position stream (12 B/vertex)
+		VertexAttribs* attribs;     // normal/tangent/uv stream (36 B/vertex)
 		u32 vertex_count;
 		u32* indices;
 		u32 index_count;

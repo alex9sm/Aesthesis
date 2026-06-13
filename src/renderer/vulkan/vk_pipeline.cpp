@@ -75,9 +75,9 @@ namespace vk {
 
 		VkPipelineVertexInputStateCreateInfo vi = {};
 		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		if (spec.vertex_binding) {
-			vi.vertexBindingDescriptionCount = 1;
-			vi.pVertexBindingDescriptions = spec.vertex_binding;
+		if (spec.vertex_binding_count) {
+			vi.vertexBindingDescriptionCount = spec.vertex_binding_count;
+			vi.pVertexBindingDescriptions = spec.vertex_bindings;
 			vi.vertexAttributeDescriptionCount = spec.vertex_attr_count;
 			vi.pVertexAttributeDescriptions = spec.vertex_attrs;
 		}

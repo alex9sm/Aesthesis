@@ -11,8 +11,6 @@
 #include "gltf.hpp"
 #include "log.hpp"
 
-#include <stddef.h>  // offsetof
-
 namespace vk {
 
 	static VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
@@ -21,18 +19,15 @@ namespace vk {
 	static bool create_pipeline() {
 		Targets& t = targets();
 
-		// vertex input matches gbuffer exactly so the same vertex buffer binds
-		// for both; attrs 1-3 are fetched but the vertex shader ignores them.
+		// position-only input: bind just the position stream (binding 0). this is
+		// the bandwidth win over gbuffer — 12 B/vertex fetched instead of 48 B.
 		VkVertexInputBindingDescription binding = {};
 		binding.binding = 0;
-		binding.stride = sizeof(renderer::Vertex);
+		binding.stride = sizeof(vec3);
 		binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-		VkVertexInputAttributeDescription attrs[4] = {};
-		attrs[0].location = 0; attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[0].offset = (u32)offsetof(renderer::Vertex, position);
-		attrs[1].location = 1; attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[1].offset = (u32)offsetof(renderer::Vertex, normal);
-		attrs[2].location = 2; attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrs[2].offset = (u32)offsetof(renderer::Vertex, tangent);
-		attrs[3].location = 3; attrs[3].format = VK_FORMAT_R32G32_SFLOAT;       attrs[3].offset = (u32)offsetof(renderer::Vertex, uv);
+		VkVertexInputAttributeDescription attrs[1] = {};
+		attrs[0].location = 0; attrs[0].binding = 0; attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT; attrs[0].offset = 0;
 
 		VkDescriptorSetLayout set_layouts[] = { global_set_layout() };
 
@@ -40,9 +35,10 @@ namespace vk {
 		// Vulkan rasterizes and writes depth without invoking a fragment shader.
 		GraphicsPipelineSpec spec = {};
 		spec.vs_path = "shaders/spv/depth_prepass.vert.spv";
-		spec.vertex_binding = &binding;
+		spec.vertex_bindings = &binding;
+		spec.vertex_binding_count = 1;
 		spec.vertex_attrs = attrs;
-		spec.vertex_attr_count = 4;
+		spec.vertex_attr_count = 1;
 		spec.cull = VK_CULL_MODE_BACK_BIT;
 		spec.depth_test = VK_TRUE;
 		spec.depth_write = VK_TRUE;
@@ -123,7 +119,7 @@ namespace vk {
 			if (!m) continue;
 
 			VkDeviceSize offset = 0;
-			vkCmdBindVertexBuffers(cmd, 0, 1, &m->vertex_buffer, &offset);
+			vkCmdBindVertexBuffers(cmd, 0, 1, &m->position_buffer, &offset);
 			vkCmdBindIndexBuffer(cmd, m->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(cmd, m->index_count, batch.instance_count, 0, 0, batch.first_instance);
 		}

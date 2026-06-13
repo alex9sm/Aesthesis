@@ -23,17 +23,17 @@ namespace vk {
 	static bool create_pipeline() {
 		Targets& t = targets();
 
-		// vertex input: pos / normal / tangent / uv
-		VkVertexInputBindingDescription binding = {};
-		binding.binding = 0;
-		binding.stride = sizeof(renderer::Vertex);
-		binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		// vertex input: position stream (binding 0) + attribute stream (binding 1).
+		// position-only passes bind just binding 0; here we consume both.
+		VkVertexInputBindingDescription bindings[2] = {};
+		bindings[0].binding = 0; bindings[0].stride = sizeof(vec3);                    bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		bindings[1].binding = 1; bindings[1].stride = sizeof(renderer::VertexAttribs); bindings[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
 		VkVertexInputAttributeDescription attrs[4] = {};
-		attrs[0].location = 0; attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[0].offset = (u32)offsetof(renderer::Vertex, position);
-		attrs[1].location = 1; attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[1].offset = (u32)offsetof(renderer::Vertex, normal);
-		attrs[2].location = 2; attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrs[2].offset = (u32)offsetof(renderer::Vertex, tangent);
-		attrs[3].location = 3; attrs[3].format = VK_FORMAT_R32G32_SFLOAT;       attrs[3].offset = (u32)offsetof(renderer::Vertex, uv);
+		attrs[0].location = 0; attrs[0].binding = 0; attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[0].offset = 0;
+		attrs[1].location = 1; attrs[1].binding = 1; attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;    attrs[1].offset = (u32)offsetof(renderer::VertexAttribs, normal);
+		attrs[2].location = 2; attrs[2].binding = 1; attrs[2].format = VK_FORMAT_R32G32B32A32_SFLOAT; attrs[2].offset = (u32)offsetof(renderer::VertexAttribs, tangent);
+		attrs[3].location = 3; attrs[3].binding = 1; attrs[3].format = VK_FORMAT_R32G32_SFLOAT;       attrs[3].offset = (u32)offsetof(renderer::VertexAttribs, uv);
 
 		VkFormat color_formats[3] = { t.albedo.format, t.normal.format, t.material.format };
 		VkDescriptorSetLayout set_layouts[] = { global_set_layout() };
@@ -43,7 +43,8 @@ namespace vk {
 		GraphicsPipelineSpec spec = {};
 		spec.vs_path = "shaders/spv/gbuffer.vert.spv";
 		spec.fs_path = "shaders/spv/gbuffer.frag.spv";
-		spec.vertex_binding = &binding;
+		spec.vertex_bindings = bindings;
+		spec.vertex_binding_count = 2;
 		spec.vertex_attrs = attrs;
 		spec.vertex_attr_count = 4;
 		spec.cull = VK_CULL_MODE_BACK_BIT;
@@ -157,8 +158,9 @@ namespace vk {
 			const MeshGPU* m = get_mesh(batch.mesh);
 			if (!m) continue;
 
-			VkDeviceSize offset = 0;
-			vkCmdBindVertexBuffers(cmd, 0, 1, &m->vertex_buffer, &offset);
+			VkBuffer vbs[2] = { m->position_buffer, m->attrib_buffer };
+			VkDeviceSize offsets[2] = { 0, 0 };
+			vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
 			vkCmdBindIndexBuffer(cmd, m->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 			// each instance within the batch picks its InstanceData via
 			// gl_InstanceIndex = firstInstance + instance_within_draw.

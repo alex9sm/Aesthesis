@@ -1,8 +1,8 @@
 #version 450
 
-// position-only prepass. the vertex buffer still streams normal/tangent/uv
-// (they're part of the shared Vertex layout) — those attributes are simply
-// not declared here, so the GPU fetches them but the shader ignores them.
+// position-only prepass. the pipeline binds only the position stream (a tight
+// 12 B/vertex buffer, binding 0); the normal/tangent/uv attribute stream is
+// never bound here, so no wasted vertex fetch.
 layout(location = 0) in vec3 in_position;
 
 layout(set = 0, binding = 0) uniform Globals {

@@ -45,13 +45,14 @@ namespace renderer {
 		if (!pos_attr) return false;
 
 		u32 vertex_count = (u32)pos_attr->data->count;
-		Vertex* vertices = (Vertex*)memory::malloc(sizeof(Vertex) * vertex_count);
-		memory::set(vertices, 0, sizeof(Vertex) * vertex_count);
+		vec3* positions = (vec3*)memory::malloc(sizeof(vec3) * vertex_count);
+		VertexAttribs* attribs = (VertexAttribs*)memory::malloc(sizeof(VertexAttribs) * vertex_count);
+		memory::set(attribs, 0, sizeof(VertexAttribs) * vertex_count);
 
 		for (u32 i = 0; i < vertex_count; i++) {
 			f32 p[3] = {};
 			cgltf_accessor_read_float(pos_attr->data, i, p, 3);
-			vertices[i].position = { p[0], p[1], p[2] };
+			positions[i] = { p[0], p[1], p[2] };
 		}
 
 		// AABB: prefer the POSITION accessor's min/max (exact, free). fall back
@@ -60,10 +61,10 @@ namespace renderer {
 			out->aabb_min = { pos_attr->data->min[0], pos_attr->data->min[1], pos_attr->data->min[2] };
 			out->aabb_max = { pos_attr->data->max[0], pos_attr->data->max[1], pos_attr->data->max[2] };
 		} else if (vertex_count > 0) {
-			vec3 lo = vertices[0].position;
+			vec3 lo = positions[0];
 			vec3 hi = lo;
 			for (u32 i = 1; i < vertex_count; i++) {
-				vec3 p = vertices[i].position;
+				vec3 p = positions[i];
 				if (p.x < lo.x) lo.x = p.x; if (p.x > hi.x) hi.x = p.x;
 				if (p.y < lo.y) lo.y = p.y; if (p.y > hi.y) hi.y = p.y;
 				if (p.z < lo.z) lo.z = p.z; if (p.z > hi.z) hi.z = p.z;
@@ -79,11 +80,11 @@ namespace renderer {
 			for (u32 i = 0; i < vertex_count; i++) {
 				f32 n[3] = {};
 				cgltf_accessor_read_float(nrm_attr->data, i, n, 3);
-				vertices[i].normal = { n[0], n[1], n[2] };
+				attribs[i].normal = { n[0], n[1], n[2] };
 			}
 		} else {
 			for (u32 i = 0; i < vertex_count; i++) {
-				vertices[i].normal = { 0.0f, 1.0f, 0.0f };
+				attribs[i].normal = { 0.0f, 1.0f, 0.0f };
 			}
 		}
 
@@ -94,14 +95,14 @@ namespace renderer {
 			for (u32 i = 0; i < vertex_count; i++) {
 				f32 t[4] = {};
 				cgltf_accessor_read_float(tan_attr->data, i, t, 4);
-				vertices[i].tangent = { t[0], t[1], t[2], t[3] };
+				attribs[i].tangent = { t[0], t[1], t[2], t[3] };
 			}
 		} else {
 			if (!tan_attr) {
 				logger::error("glTF primitive missing TANGENT attribute — normal mapping will be incorrect");
 			}
 			for (u32 i = 0; i < vertex_count; i++) {
-				vertices[i].tangent = { 1.0f, 0.0f, 0.0f, 1.0f };
+				attribs[i].tangent = { 1.0f, 0.0f, 0.0f, 1.0f };
 			}
 		}
 
@@ -110,7 +111,7 @@ namespace renderer {
 			for (u32 i = 0; i < vertex_count; i++) {
 				f32 uv[2] = {};
 				cgltf_accessor_read_float(uv_attr->data, i, uv, 2);
-				vertices[i].uv = { uv[0], uv[1] };
+				attribs[i].uv = { uv[0], uv[1] };
 			}
 		}
 		// else: uv remains {0,0} from the initial memory::set above.
@@ -129,7 +130,8 @@ namespace renderer {
 			for (u32 i = 0; i < index_count; i++) indices[i] = i;
 		}
 
-		out->vertices = vertices;
+		out->positions = positions;
+		out->attribs = attribs;
 		out->vertex_count = vertex_count;
 		out->indices = indices;
 		out->index_count = index_count;
@@ -177,8 +179,9 @@ namespace renderer {
 	}
 
 	void free_mesh_data(MeshData* mesh) {
-		if (mesh->vertices) memory::free(mesh->vertices);
-		if (mesh->indices)  memory::free(mesh->indices);
+		if (mesh->positions) memory::free(mesh->positions);
+		if (mesh->attribs)   memory::free(mesh->attribs);
+		if (mesh->indices)   memory::free(mesh->indices);
 		*mesh = {};
 	}
 

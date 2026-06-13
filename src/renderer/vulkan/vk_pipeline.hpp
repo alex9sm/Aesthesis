@@ -20,9 +20,11 @@ namespace vk {
 		const char* vs_path;
 		const char* fs_path; // null => depth-only (no fragment stage)
 
-		// vertex input. leave vertex_binding null for fullscreen passes (the
-		// vertex shader generates positions from gl_VertexIndex).
-		const VkVertexInputBindingDescription*   vertex_binding;
+		// vertex input. leave vertex_binding_count 0 for fullscreen passes (the
+		// vertex shader generates positions from gl_VertexIndex). multiple
+		// bindings let a pass stream separate buffers (e.g. position + attribs).
+		const VkVertexInputBindingDescription*   vertex_bindings;
+		u32 vertex_binding_count;
 		const VkVertexInputAttributeDescription* vertex_attrs;
 		u32 vertex_attr_count;
 

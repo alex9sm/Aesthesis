@@ -14,8 +14,10 @@ namespace vk {
 	static constexpr u32 MAX_MESHES = 256;
 
 	struct MeshGPU {
-		VkBuffer vertex_buffer;
-		VmaAllocation vertex_alloc;
+		VkBuffer position_buffer;   // vec3 position stream (binding 0)
+		VmaAllocation position_alloc;
+		VkBuffer attrib_buffer;     // normal/tangent/uv stream (binding 1)
+		VmaAllocation attrib_alloc;
 		VkBuffer index_buffer;
 		VmaAllocation index_alloc;
 		u32 vertex_count;

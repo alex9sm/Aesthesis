@@ -84,7 +84,8 @@ namespace vk {
 		GraphicsPipelineSpec spec = {};
 		spec.vs_path = "shaders/spv/draw2d_rect.vert.spv";
 		spec.fs_path = "shaders/spv/draw2d_rect.frag.spv";
-		spec.vertex_binding = &vb;
+		spec.vertex_bindings = &vb;
+		spec.vertex_binding_count = 1;
 		spec.vertex_attrs = va;
 		spec.vertex_attr_count = 2;
 		spec.color_formats = &color_format;
@@ -120,7 +121,8 @@ namespace vk {
 		GraphicsPipelineSpec spec = {};
 		spec.vs_path = "shaders/spv/draw2d_text.vert.spv";
 		spec.fs_path = "shaders/spv/draw2d_text.frag.spv";
-		spec.vertex_binding = &vb;
+		spec.vertex_bindings = &vb;
+		spec.vertex_binding_count = 1;
 		spec.vertex_attrs = va;
 		spec.vertex_attr_count = 3;
 		spec.color_formats = &color_format;

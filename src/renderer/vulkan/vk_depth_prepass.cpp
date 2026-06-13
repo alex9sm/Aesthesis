@@ -170,14 +170,9 @@ namespace vk {
 	{
 		Targets& t = targets();
 
-		// depth target persists across frames; reset to UNDEFINED so the
-		// transition discards previous-frame contents. this is the first
-		// writer of depth in the frame now (was previously gbuffer).
-		t.depth.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-		transition_image(cmd, t.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
-			VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
+		// depth target persists across frames; discard previous-frame contents.
+		// this is the first writer of depth in the frame (was previously gbuffer).
+		transition_discard(cmd, t.depth, ResState::DepthWrite);
 
 		VkRenderingAttachmentInfo depth_attachment = {};
 		depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -236,12 +231,7 @@ namespace vk {
 
 		// hand the depth target off to the gbuffer pass for an EQUAL read.
 		// stays in DEPTH_ATTACHMENT_OPTIMAL — only the access scope changes.
-		transition_image(cmd, t.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
-			VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
-			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
+		transition(cmd, t.depth, ResState::DepthRead);
 	}
 
 }

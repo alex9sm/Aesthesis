@@ -241,36 +241,13 @@ namespace vk {
 		vkUpdateDescriptorSets(c.device, 5, writes, 0, nullptr);
 	}
 
-	static void transition_swapchain(VkCommandBuffer cmd, VkImage image,
-		VkImageLayout from, VkImageLayout to,
-		VkAccessFlags src_access, VkAccessFlags dst_access,
-		VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
-	{
-		VkImageMemoryBarrier b = {};
-		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		b.oldLayout = from;
-		b.newLayout = to;
-		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.image = image;
-		b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		b.subresourceRange.levelCount = 1;
-		b.subresourceRange.layerCount = 1;
-		b.srcAccessMask = src_access;
-		b.dstAccessMask = dst_access;
-		vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
-	}
-
 	void execute_debug_pass(VkCommandBuffer cmd, u32 swapchain_image_index, u32 mode) {
 		Swapchain& sc = swapchain();
 		VkImage dst = sc.images[swapchain_image_index];
 		VkImageView dst_view = sc.image_views[swapchain_image_index];
 
-		// swapchain image: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
-		transition_swapchain(cmd, dst,
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		// swapchain image: discard -> color write
+		transition_raw(cmd, dst, ResState::Undefined, ResState::ColorWrite);
 
 		VkRenderingAttachmentInfo color = {};
 		color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;

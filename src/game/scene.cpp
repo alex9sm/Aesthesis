@@ -51,9 +51,9 @@ namespace scene {
 		renderer::submit_model(chess);
 
 		// test point lights
-		//renderer::submit_light({ 4.0f, 4.0f, 0.0f },  { 1.0f, 0.3f, 0.1f }, 10.0f, 30.0f);
-		//renderer::submit_light({-4.0f, 4.0f, 0.0f },  { 0.1f, 0.3f, 1.0f }, 10.0f, 30.0f);
-		//renderer::submit_light({ 0.0f, 5.0f, 8.0f },  { 0.2f, 1.0f, 0.2f }, 10.0f, 30.0f);
+		renderer::submit_light({ 4.0f, 4.0f, 0.0f },  { 1.0f, 0.3f, 0.1f }, 10.0f, 30.0f);
+		renderer::submit_light({-4.0f, 4.0f, 0.0f },  { 0.1f, 0.3f, 1.0f }, 10.0f, 30.0f);
+		renderer::submit_light({ 0.0f, 5.0f, 8.0f },  { 0.2f, 1.0f, 0.2f }, 10.0f, 30.0f);
 
 		// --- FPS HUD ---
 		fps_accum_time   += dt;

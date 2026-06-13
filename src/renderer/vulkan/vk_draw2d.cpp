@@ -2,6 +2,7 @@
 #include "vk_draw2d.hpp"
 #include "vk_init.hpp"
 #include "vk_swapchain.hpp"
+#include "vk_targets.hpp"
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
 #include "vk_globals.hpp"
@@ -454,26 +455,6 @@ namespace vk {
 
 	// --- execute ---
 
-	static void transition_swapchain(VkCommandBuffer cmd, VkImage image,
-		VkImageLayout from, VkImageLayout to,
-		VkAccessFlags src_access, VkAccessFlags dst_access,
-		VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
-	{
-		VkImageMemoryBarrier b = {};
-		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		b.oldLayout = from;
-		b.newLayout = to;
-		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.image = image;
-		b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		b.subresourceRange.levelCount = 1;
-		b.subresourceRange.layerCount = 1;
-		b.srcAccessMask = src_access;
-		b.dstAccessMask = dst_access;
-		vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
-	}
-
 	void execute_overlay_pass(VkCommandBuffer cmd, u32 swapchain_image_index) {
 		Swapchain& sc = swapchain();
 		u32 frame_idx = current_frame_index();
@@ -560,10 +541,7 @@ namespace vk {
 		}
 
 		// always transition to PRESENT_SRC — overlay is the single owner of this transition
-		transition_swapchain(cmd, dst,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+		transition_raw(cmd, dst, ResState::ColorWrite, ResState::Present);
 
 		// clear CPU queues for next frame
 		rect_count = 0;

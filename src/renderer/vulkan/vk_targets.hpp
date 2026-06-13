@@ -8,12 +8,23 @@
 
 namespace vk {
 
+	// semantic resource state: each maps to a {layout, access, stage} triple
+	// (see state_info in vk_targets.cpp). Passes declare intent, not raw masks.
+	enum class ResState {
+		Undefined,   // discard / initial
+		ColorWrite,  // color attachment output
+		DepthWrite,  // depth attachment read+write
+		DepthRead,   // depth attachment read (EQUAL test, no write)
+		ShaderRead,  // sampled in a fragment shader
+		Present,     // ready for vkQueuePresent
+	};
+
 	struct RenderImage {
 		VkImage       image;
 		VkImageView   view;
 		VmaAllocation alloc;
 		VkFormat      format;
-		VkImageLayout layout; // tracked across passes
+		ResState      state; // tracked across passes
 	};
 
 	struct Targets {
@@ -31,11 +42,15 @@ namespace vk {
 
 	Targets& targets();
 
-	// shared helper: transitions an image and updates its tracked layout
-	void transition_image(VkCommandBuffer cmd, RenderImage& img,
-		VkImageAspectFlags aspect,
-		VkImageLayout new_layout,
-		VkAccessFlags src_access, VkAccessFlags dst_access,
-		VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage);
+	// transition a tracked image to a new state. old state, layouts, access
+	// and stage masks are all derived from img.state -> new_state.
+	void transition(VkCommandBuffer cmd, RenderImage& img, ResState new_state);
+
+	// same, but discards previous contents (oldLayout = UNDEFINED). use when
+	// the image is about to be fully overwritten and its old data is dead.
+	void transition_discard(VkCommandBuffer cmd, RenderImage& img, ResState new_state);
+
+	// transition an untracked image (e.g. swapchain) between explicit states.
+	void transition_raw(VkCommandBuffer cmd, VkImage image, ResState from, ResState to);
 
 }

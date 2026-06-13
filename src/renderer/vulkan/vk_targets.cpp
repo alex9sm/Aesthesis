@@ -56,7 +56,7 @@ namespace vk {
 		}
 
 		out->format = format;
-		out->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		out->state = ResState::Undefined;
 		return true;
 	}
 
@@ -112,26 +112,84 @@ namespace vk {
 		return create_all(extent);
 	}
 
-	void transition_image(VkCommandBuffer cmd, RenderImage& img,
-		VkImageAspectFlags aspect,
-		VkImageLayout new_layout,
-		VkAccessFlags src_access, VkAccessFlags dst_access,
-		VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
+	// --- barrier state machine ---
+
+	struct StateInfo {
+		VkImageLayout        layout;
+		VkAccessFlags        access;
+		VkPipelineStageFlags stage;
+	};
+
+	// Single source of truth: maps a semantic state to the layout it lives in
+	// plus the access/stage scope to synchronize against. Depth states use the
+	// EARLY|LATE fragment-test superset so each is correct both as a barrier
+	// source and destination.
+	static StateInfo state_info(ResState s) {
+		switch (s) {
+		case ResState::ColorWrite:
+			return { VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+		case ResState::DepthWrite:
+			return { VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+				VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT };
+		case ResState::DepthRead:
+			return { VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+				VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT };
+		case ResState::ShaderRead:
+			return { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				VK_ACCESS_SHADER_READ_BIT,
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT };
+		case ResState::Present:
+			return { VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT };
+		case ResState::Undefined:
+		default:
+			return { VK_IMAGE_LAYOUT_UNDEFINED, 0,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT };
+		}
+	}
+
+	static VkImageAspectFlags aspect_for_format(VkFormat f) {
+		return (f == VK_FORMAT_D32_SFLOAT) ? VK_IMAGE_ASPECT_DEPTH_BIT
+			: VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+
+	static void emit_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
+		StateInfo from, StateInfo to)
 	{
 		VkImageMemoryBarrier b = {};
 		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		b.oldLayout = img.layout;
-		b.newLayout = new_layout;
+		b.oldLayout = from.layout;
+		b.newLayout = to.layout;
 		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.image = img.image;
+		b.image = image;
 		b.subresourceRange.aspectMask = aspect;
 		b.subresourceRange.levelCount = 1;
 		b.subresourceRange.layerCount = 1;
-		b.srcAccessMask = src_access;
-		b.dstAccessMask = dst_access;
-		vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
-		img.layout = new_layout;
+		b.srcAccessMask = from.access;
+		b.dstAccessMask = to.access;
+		vkCmdPipelineBarrier(cmd, from.stage, to.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
+	}
+
+	void transition(VkCommandBuffer cmd, RenderImage& img, ResState new_state) {
+		emit_barrier(cmd, img.image, aspect_for_format(img.format),
+			state_info(img.state), state_info(new_state));
+		img.state = new_state;
+	}
+
+	void transition_discard(VkCommandBuffer cmd, RenderImage& img, ResState new_state) {
+		emit_barrier(cmd, img.image, aspect_for_format(img.format),
+			state_info(ResState::Undefined), state_info(new_state));
+		img.state = new_state;
+	}
+
+	void transition_raw(VkCommandBuffer cmd, VkImage image, ResState from, ResState to) {
+		emit_barrier(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT,
+			state_info(from), state_info(to));
 	}
 
 }

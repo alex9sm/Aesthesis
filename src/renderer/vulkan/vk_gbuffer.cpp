@@ -195,28 +195,12 @@ namespace vk {
 	{
 		Targets& t = targets();
 
-		// reset color layouts at the top of each frame so transitions begin
-		// from a known state. depth is owned by the prepass: it already sits
-		// in DEPTH_ATTACHMENT_OPTIMAL with the prepass's write barrier
-		// resolved, so we leave its `layout` field alone here.
-		t.albedo.layout   = VK_IMAGE_LAYOUT_UNDEFINED;
-		t.normal.layout   = VK_IMAGE_LAYOUT_UNDEFINED;
-		t.material.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-		transition_image(cmd, t.albedo, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-		transition_image(cmd, t.normal, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-		transition_image(cmd, t.material, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-		// depth: prepass already issued WRITE→READ; depth is in
-		// DEPTH_ATTACHMENT_OPTIMAL and ready to be read+tested.
+		// discard last frame's color contents and move to write state. depth is
+		// owned by the prepass: it already sits in DepthRead (the prepass issued
+		// WRITE→READ), ready to be read+tested, so we leave it untouched here.
+		transition_discard(cmd, t.albedo,   ResState::ColorWrite);
+		transition_discard(cmd, t.normal,   ResState::ColorWrite);
+		transition_discard(cmd, t.material, ResState::ColorWrite);
 
 		// rendering attachments
 		VkRenderingAttachmentInfo color_attachments[3] = {};
@@ -299,25 +283,11 @@ namespace vk {
 
 		vkCmdEndRendering(cmd);
 
-		// transition all attachments to SHADER_READ_ONLY for the lighting pass
-		transition_image(cmd, t.albedo, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		transition_image(cmd, t.normal, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		transition_image(cmd, t.material, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		// gbuffer didn't write depth (EQUAL test + no-write); src_access is
-		// READ. lighting now samples it as a regular texture.
-		transition_image(cmd, t.depth, VK_IMAGE_ASPECT_DEPTH_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		// hand all attachments (incl. depth) to the lighting pass as textures.
+		transition(cmd, t.albedo,   ResState::ShaderRead);
+		transition(cmd, t.normal,   ResState::ShaderRead);
+		transition(cmd, t.material, ResState::ShaderRead);
+		transition(cmd, t.depth,    ResState::ShaderRead);
 	}
 
 }

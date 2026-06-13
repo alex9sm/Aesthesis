@@ -242,12 +242,8 @@ namespace vk {
 	void execute_lighting_pass(VkCommandBuffer cmd) {
 		Targets& t = targets();
 
-		// scene_hdr → COLOR_ATTACHMENT_OPTIMAL (don't care about previous contents)
-		t.scene_hdr.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-		transition_image(cmd, t.scene_hdr, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+		// scene_hdr → color write (don't care about previous contents)
+		transition_discard(cmd, t.scene_hdr, ResState::ColorWrite);
 
 		VkRenderingAttachmentInfo color = {};
 		color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -291,11 +287,8 @@ namespace vk {
 
 		vkCmdEndRendering(cmd);
 
-		// scene_hdr → SHADER_READ_ONLY for the debug/composite pass
-		transition_image(cmd, t.scene_hdr, VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		// scene_hdr → shader read for the debug/composite pass
+		transition(cmd, t.scene_hdr, ResState::ShaderRead);
 	}
 
 }

@@ -2,6 +2,7 @@
 #include "vk_mesh.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
+#include "vk_upload.hpp"
 #include "log.hpp"
 #include "memory.hpp"
 
@@ -28,39 +29,13 @@ namespace vk {
 		return INVALID_MESH;
 	}
 
-	// creates a host-visible staging buffer, copies into it, then uses a transient
-	// command buffer to copy into the device-local destination.
-	static bool upload_buffer(const void* src, VkDeviceSize size,
+	// creates the device-local destination and records a staged copy into it on
+	// the open upload batch. the copy completes when that batch is submitted.
+	static bool create_and_stage(const void* src, VkDeviceSize size,
 		VkBufferUsageFlags usage, VkBuffer* out_buffer, VmaAllocation* out_alloc)
 	{
-		Context& c = context();
 		VmaAllocator a = allocator();
 
-		// staging
-		VkBuffer staging = VK_NULL_HANDLE;
-		VmaAllocation staging_alloc = {};
-		VmaAllocationInfo staging_info = {};
-
-		VkBufferCreateInfo staging_ci = {};
-		staging_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		staging_ci.size = size;
-		staging_ci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		staging_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-		VmaAllocationCreateInfo staging_alloc_ci = {};
-		staging_alloc_ci.usage = VMA_MEMORY_USAGE_AUTO;
-		staging_alloc_ci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-			| VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-		if (vmaCreateBuffer(a, &staging_ci, &staging_alloc_ci,
-			&staging, &staging_alloc, &staging_info) != VK_SUCCESS) {
-			logger::error("vmaCreateBuffer (staging) failed");
-			return false;
-		}
-
-		memory::copy(staging_info.pMappedData, src, (usize)size);
-
-		// destination
 		VkBufferCreateInfo dst_ci = {};
 		dst_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		dst_ci.size = size;
@@ -73,47 +48,15 @@ namespace vk {
 		if (vmaCreateBuffer(a, &dst_ci, &dst_alloc_ci,
 			out_buffer, out_alloc, nullptr) != VK_SUCCESS) {
 			logger::error("vmaCreateBuffer (device) failed");
-			vmaDestroyBuffer(a, staging, staging_alloc);
 			return false;
 		}
 
-		// transient command buffer for the copy
-		VkCommandPool pool = VK_NULL_HANDLE;
-		VkCommandPoolCreateInfo pool_ci = {};
-		pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		pool_ci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		pool_ci.queueFamilyIndex = c.graphics_queue_index;
-		vkCreateCommandPool(c.device, &pool_ci, nullptr, &pool);
-
-		VkCommandBuffer cmd = VK_NULL_HANDLE;
-		VkCommandBufferAllocateInfo alloc_info = {};
-		alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		alloc_info.commandPool = pool;
-		alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		alloc_info.commandBufferCount = 1;
-		vkAllocateCommandBuffers(c.device, &alloc_info, &cmd);
-
-		VkCommandBufferBeginInfo begin = {};
-		begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		vkBeginCommandBuffer(cmd, &begin);
-
-		VkBufferCopy copy = {};
-		copy.size = size;
-		vkCmdCopyBuffer(cmd, staging, *out_buffer, 1, &copy);
-
-		vkEndCommandBuffer(cmd);
-
-		VkSubmitInfo submit = {};
-		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submit.commandBufferCount = 1;
-		submit.pCommandBuffers = &cmd;
-
-		vkQueueSubmit(c.graphics_queue, 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(c.graphics_queue);
-
-		vkDestroyCommandPool(c.device, pool, nullptr);
-		vmaDestroyBuffer(a, staging, staging_alloc);
+		if (!stage_to_buffer(src, size, *out_buffer)) {
+			vmaDestroyBuffer(a, *out_buffer, *out_alloc);
+			*out_buffer = VK_NULL_HANDLE;
+			*out_alloc = {};
+			return false;
+		}
 		return true;
 	}
 
@@ -129,23 +72,18 @@ namespace vk {
 		VkDeviceSize attr_size = sizeof(renderer::VertexAttribs) * data.vertex_count;
 		VkDeviceSize ib_size = sizeof(u32) * data.index_count;
 
-		if (!upload_buffer(data.positions, pos_size,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.position_buffer, &m.position_alloc)) {
-			return INVALID_MESH;
-		}
+		begin_upload();
+		bool ok = create_and_stage(data.positions, pos_size,
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.position_buffer, &m.position_alloc)
+			&& create_and_stage(data.attribs, attr_size,
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.attrib_buffer, &m.attrib_alloc)
+			&& create_and_stage(data.indices, ib_size,
+				VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &m.index_buffer, &m.index_alloc);
+		end_upload();
 
-		if (!upload_buffer(data.attribs, attr_size,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.attrib_buffer, &m.attrib_alloc)) {
-			vmaDestroyBuffer(allocator(), m.position_buffer, m.position_alloc);
-			m = {};
-			return INVALID_MESH;
-		}
-
-		if (!upload_buffer(data.indices, ib_size,
-			VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &m.index_buffer, &m.index_alloc)) {
-			vmaDestroyBuffer(allocator(), m.attrib_buffer, m.attrib_alloc);
-			vmaDestroyBuffer(allocator(), m.position_buffer, m.position_alloc);
-			m = {};
+		if (!ok) {
+			flush_upload();
+			destroy_mesh(slot);
 			return INVALID_MESH;
 		}
 

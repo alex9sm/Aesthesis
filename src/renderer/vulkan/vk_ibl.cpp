@@ -7,6 +7,7 @@
 #include "vk_ibl.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
+#include "vk_upload.hpp"
 #include "vk_frame.hpp"
 #include "vk_globals.hpp"
 #include "vk_pipeline.hpp"
@@ -95,43 +96,6 @@ namespace vk {
 		return true;
 	}
 
-	static VkCommandBuffer begin_one_shot(VkCommandPool* out_pool) {
-		Context& c = context();
-
-		VkCommandPoolCreateInfo pci = {};
-		pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		pci.queueFamilyIndex = c.graphics_queue_index;
-		vkCreateCommandPool(c.device, &pci, nullptr, out_pool);
-
-		VkCommandBufferAllocateInfo ai = {};
-		ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		ai.commandPool = *out_pool;
-		ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		ai.commandBufferCount = 1;
-		VkCommandBuffer cmd = VK_NULL_HANDLE;
-		vkAllocateCommandBuffers(c.device, &ai, &cmd);
-
-		VkCommandBufferBeginInfo bi = {};
-		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		vkBeginCommandBuffer(cmd, &bi);
-		return cmd;
-	}
-
-	static void end_one_shot(VkCommandBuffer cmd, VkCommandPool pool) {
-		Context& c = context();
-		vkEndCommandBuffer(cmd);
-
-		VkSubmitInfo si = {};
-		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		si.commandBufferCount = 1;
-		si.pCommandBuffers = &cmd;
-		vkQueueSubmit(c.graphics_queue, 1, &si, VK_NULL_HANDLE);
-		vkQueueWaitIdle(c.graphics_queue);
-		vkDestroyCommandPool(c.device, pool, nullptr);
-	}
-
 	static void simple_barrier(VkCommandBuffer cmd, VkImage image,
 		VkImageLayout from, VkImageLayout to,
 		VkAccessFlags src_access, VkAccessFlags dst_access,
@@ -217,31 +181,18 @@ namespace vk {
 
 		// build an RGBA16F buffer from RGBA8 (only R/G are meaningful)
 		VkDeviceSize byte_size = (VkDeviceSize)w * h * 8; // 4 channels * 2 bytes
-		VmaAllocator a = allocator();
-		Context& c = context();
 
-		VkBuffer staging = VK_NULL_HANDLE;
-		VmaAllocation staging_alloc = {};
-		VmaAllocationInfo staging_info = {};
+		VkCommandBuffer cmd = begin_upload();
 
-		VkBufferCreateInfo bci = {};
-		bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bci.size = byte_size;
-		bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-		VmaAllocationCreateInfo sb_aci = {};
-		sb_aci.usage = VMA_MEMORY_USAGE_AUTO;
-		sb_aci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-			| VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-		if (vmaCreateBuffer(a, &bci, &sb_aci, &staging, &staging_alloc, &staging_info) != VK_SUCCESS) {
-			logger::error("BRDF LUT PNG staging buffer create failed");
+		StagingBlock staging = {};
+		if (!stage_alloc(byte_size, &staging)) {
+			logger::error("BRDF LUT PNG staging allocation failed");
+			end_upload();
 			stbi_image_free(data);
 			return false;
 		}
 
-		u16* dst = (u16*)staging_info.pMappedData;
+		u16* dst = (u16*)staging.mapped;
 		const f32 inv = 1.0f / 255.0f;
 		u32 texels = (u32)(w * h);
 		for (u32 i = 0; i < texels; i++) {
@@ -254,9 +205,6 @@ namespace vk {
 		}
 		stbi_image_free(data);
 
-		VkCommandPool pool = VK_NULL_HANDLE;
-		VkCommandBuffer cmd = begin_one_shot(&pool);
-
 		simple_barrier(cmd, brdf_lut.image,
 			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			0, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -266,7 +214,7 @@ namespace vk {
 		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		region.imageSubresource.layerCount = 1;
 		region.imageExtent = { BRDF_LUT_SIZE, BRDF_LUT_SIZE, 1 };
-		vkCmdCopyBufferToImage(cmd, staging, brdf_lut.image,
+		vkCmdCopyBufferToImage(cmd, staging.buffer, brdf_lut.image,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
 		simple_barrier(cmd, brdf_lut.image,
@@ -274,8 +222,7 @@ namespace vk {
 			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-		end_one_shot(cmd, pool);
-		vmaDestroyBuffer(a, staging, staging_alloc);
+		end_upload();
 
 		logger::info("BRDF LUT loaded from %s (%ux%u)", BRDF_LUT_PNG, BRDF_LUT_SIZE, BRDF_LUT_SIZE);
 		return true;
@@ -346,8 +293,7 @@ namespace vk {
 		vkUpdateDescriptorSets(c.device, 1, &w, 0, nullptr);
 
 		// dispatch
-		VkCommandPool cmd_pool = VK_NULL_HANDLE;
-		VkCommandBuffer cmd = begin_one_shot(&cmd_pool);
+		VkCommandBuffer cmd = begin_upload();
 
 		simple_barrier(cmd, brdf_lut.image,
 			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
@@ -365,7 +311,9 @@ namespace vk {
 			VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-		end_one_shot(cmd, cmd_pool);
+		end_upload();
+		// the dispatch must have retired before the pipeline it binds is destroyed
+		flush_upload();
 
 		// cleanup one-shot bake resources
 		vkDestroyDescriptorPool(c.device, pool, nullptr);
@@ -416,29 +364,22 @@ namespace vk {
 		VkDeviceSize bytes_per_face = sizeof(texel);
 		VkDeviceSize total = bytes_per_face * 6;
 
-		VkBuffer staging = VK_NULL_HANDLE;
-		VmaAllocation staging_alloc = {};
-		VmaAllocationInfo staging_info = {};
+		VkCommandBuffer cmd = begin_upload();
 
-		VkBufferCreateInfo bci = {};
-		bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bci.size = total;
-		bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		StagingBlock staging = {};
+		if (!stage_alloc(total, &staging)) {
+			logger::fatal("IBL placeholder staging allocation failed");
+			end_upload();
+			vmaDestroyImage(a, out->image, out->alloc);
+			out->image = VK_NULL_HANDLE;
+			out->alloc = {};
+			return false;
+		}
 
-		VmaAllocationCreateInfo sb = {};
-		sb.usage = VMA_MEMORY_USAGE_AUTO;
-		sb.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-			| VMA_ALLOCATION_CREATE_MAPPED_BIT;
-		vmaCreateBuffer(a, &bci, &sb, &staging, &staging_alloc, &staging_info);
-
-		u8* dst = (u8*)staging_info.pMappedData;
+		u8* dst = (u8*)staging.mapped;
 		for (u32 f = 0; f < 6; f++) {
 			memory::copy(dst + f * bytes_per_face, texel, (usize)bytes_per_face);
 		}
-
-		VkCommandPool pool = VK_NULL_HANDLE;
-		VkCommandBuffer cmd = begin_one_shot(&pool);
 
 		simple_barrier(cmd, out->image,
 			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -455,7 +396,7 @@ namespace vk {
 			regions[f].imageSubresource.layerCount = 1;
 			regions[f].imageExtent = { 1, 1, 1 };
 		}
-		vkCmdCopyBufferToImage(cmd, staging, out->image,
+		vkCmdCopyBufferToImage(cmd, staging.buffer, out->image,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions);
 
 		simple_barrier(cmd, out->image,
@@ -464,8 +405,7 @@ namespace vk {
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			6);
 
-		end_one_shot(cmd, pool);
-		vmaDestroyBuffer(a, staging, staging_alloc);
+		end_upload();
 
 		VkImageViewCreateInfo vci = {};
 		vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;

@@ -8,6 +8,7 @@
 #include "vk_texture.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
+#include "vk_upload.hpp"
 #include "vk_frame.hpp"
 #include "vk_globals.hpp"
 #include "log.hpp"
@@ -102,28 +103,6 @@ namespace vk {
 		u32 mip_levels = mip_count_for(width, height);
 		VkDeviceSize byte_size = (VkDeviceSize)width * height * 4;
 
-		// staging buffer (host-visible)
-		VkBuffer staging = VK_NULL_HANDLE;
-		VmaAllocation staging_alloc = {};
-		VmaAllocationInfo staging_info = {};
-
-		VkBufferCreateInfo sb_ci = {};
-		sb_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		sb_ci.size = byte_size;
-		sb_ci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		sb_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-		VmaAllocationCreateInfo sb_alloc_ci = {};
-		sb_alloc_ci.usage = VMA_MEMORY_USAGE_AUTO;
-		sb_alloc_ci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-			| VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-		if (vmaCreateBuffer(a, &sb_ci, &sb_alloc_ci, &staging, &staging_alloc, &staging_info) != VK_SUCCESS) {
-			logger::error("vmaCreateBuffer (texture staging) failed");
-			return false;
-		}
-		memory::copy(staging_info.pMappedData, rgba, (usize)byte_size);
-
 		// destination image
 		VkImageCreateInfo img_ci = {};
 		img_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -145,30 +124,10 @@ namespace vk {
 
 		if (vmaCreateImage(a, &img_ci, &img_alloc_ci, &out->image, &out->alloc, nullptr) != VK_SUCCESS) {
 			logger::error("vmaCreateImage (texture) failed");
-			vmaDestroyBuffer(a, staging, staging_alloc);
 			return false;
 		}
 
-		// transient command buffer
-		VkCommandPool pool = VK_NULL_HANDLE;
-		VkCommandPoolCreateInfo pool_ci = {};
-		pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		pool_ci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		pool_ci.queueFamilyIndex = c.graphics_queue_index;
-		vkCreateCommandPool(c.device, &pool_ci, nullptr, &pool);
-
-		VkCommandBuffer cmd = VK_NULL_HANDLE;
-		VkCommandBufferAllocateInfo ai = {};
-		ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		ai.commandPool = pool;
-		ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		ai.commandBufferCount = 1;
-		vkAllocateCommandBuffers(c.device, &ai, &cmd);
-
-		VkCommandBufferBeginInfo bi = {};
-		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		vkBeginCommandBuffer(cmd, &bi);
+		VkCommandBuffer cmd = begin_upload();
 
 		// transition all mips: UNDEFINED -> TRANSFER_DST
 		VkImageMemoryBarrier barrier = {};
@@ -200,8 +159,14 @@ namespace vk {
 		region.imageSubresource.layerCount = 1;
 		region.imageOffset = { 0, 0, 0 };
 		region.imageExtent = { width, height, 1 };
-		vkCmdCopyBufferToImage(cmd, staging, out->image,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+		if (!stage_to_image(rgba, byte_size, out->image, &region, 1)) {
+			end_upload();
+			flush_upload();  // drain the barrier recorded against this image
+			vmaDestroyImage(a, out->image, out->alloc);
+			out->image = VK_NULL_HANDLE;
+			out->alloc = {};
+			return false;
+		}
 
 		// generate mip chain: blit mip[i-1] -> mip[i]
 		i32 src_w = (i32)width;
@@ -263,19 +228,9 @@ namespace vk {
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-		vkEndCommandBuffer(cmd);
+		end_upload();
 
-		VkSubmitInfo submit = {};
-		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submit.commandBufferCount = 1;
-		submit.pCommandBuffers = &cmd;
-		vkQueueSubmit(c.graphics_queue, 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(c.graphics_queue);
-
-		vkDestroyCommandPool(c.device, pool, nullptr);
-		vmaDestroyBuffer(a, staging, staging_alloc);
-
-		// image view (all mip levels)
+		// image view (all mip levels) — independent of the copy completing
 		VkImageViewCreateInfo view_ci = {};
 		view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		view_ci.image = out->image;
@@ -288,6 +243,7 @@ namespace vk {
 		view_ci.subresourceRange.layerCount = 1;
 		if (vkCreateImageView(c.device, &view_ci, nullptr, &out->view) != VK_SUCCESS) {
 			logger::error("vkCreateImageView (texture) failed");
+			flush_upload();
 			vmaDestroyImage(a, out->image, out->alloc);
 			out->image = VK_NULL_HANDLE;
 			out->alloc = {};

@@ -68,31 +68,17 @@ namespace renderer {
 	void unload_model(ModelHandle handle);
 
 	// Loads 6 PNG faces from assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png
-	// and bakes the irradiance + prefilter IBL cubemaps. `intensity` is a
-	// per-cubemap LDR brightness multiplier applied during both bakes
-	// (1.0 = neutral; typical artistic value 2.0-6.0 for sunny outdoor LDR
-	// sources to compensate for crushed dynamic range).
-	// Must be called OUTSIDE begin_frame / end_frame — records and submits a
-	// one-shot bake command buffer to the graphics queue.
 	CubemapHandle load_cubemap(const char* name, f32 intensity = 1.0f);
 
-	// Releases the cubemap's GPU resources. Safe to call on the currently
-	// active environment — reverts to the neutral placeholder first.
-	// Must be called OUTSIDE begin_frame / end_frame.
-	void          unload_cubemap(CubemapHandle handle);
+	// Releases the cubemap's GPU resources
+	void unload_cubemap(CubemapHandle handle);
 
-	// IBL environment selection. set_environment_cubemap drives the diffuse
-	// (and, from Phase F4, specular) IBL terms in the lighting pass. Pure
-	// descriptor swap — no GPU work. Pass INVALID_CUBEMAP / call the clear
-	// variant to revert to neutral mid-grey placeholders.
-	// Conventionally called between frames; ownership is not transferred.
 	void set_environment_cubemap(CubemapHandle handle);
 	void clear_environment_cubemap();
 
-	// lighting (persistent state; set whenever the scene changes it)
 	void set_sun(vec3 direction, vec3 color, f32 intensity);
 
-	// submit a point light for this frame. call between begin_frame/end_frame.
+	// per frame light submit
 	void submit_light(vec3 position, vec3 color, f32 radius, f32 intensity);
 
 	// frame
@@ -103,14 +89,11 @@ namespace renderer {
 		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
 	void end_frame();
 
-	// fonts — bakes an SDF atlas from a TTF and uploads it as a bindless
-	// texture. must be called OUTSIDE begin_frame / end_frame.
+	// fonts — bakes an SDF atlas from a TTF and uploads it as a texture
 	FontHandle load_font(const char* path, f32 pixel_height);
 	void       unload_font(FontHandle handle);
 
-	// 2D overlay (drawn after the 3D scene, no depth). screen-space pixel
-	// coordinates with (0,0) at the top-left. colors are RGBA with straight
-	// alpha. queues are flushed inside end_frame().
+	// 2D overlay (drawn after the 3D scene, no depth)
 	void draw_2d_rect(f32 x, f32 y, f32 w, f32 h, vec4 color);
 	void draw_text(FontHandle font, const char* str, f32 x, f32 y, f32 scale, vec4 color);
 

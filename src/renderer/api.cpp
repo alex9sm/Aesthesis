@@ -7,6 +7,7 @@
 #include "vk_init.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
+#include "vk_upload.hpp"
 #include "vk_depth_prepass.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
@@ -205,15 +206,18 @@ namespace renderer {
 			return INVALID_MODEL;
 		}
 
-		// 1. textures (in order; index i in gm becomes texture_handles[i])
+		/* One upload batch for the whole model.Every texture and mesh upload
+		below joins it, so the model costs a single submit instead of one
+		queue stall per buffer */
+		vk::begin_upload();
+
+		// 1. textures
 		TextureHandle* texture_handles = nullptr;
 		if (gm.texture_count > 0) {
 			texture_handles = (TextureHandle*)memory::malloc(sizeof(TextureHandle) * gm.texture_count);
 			for (u32 i = 0; i < gm.texture_count; i++) {
 				texture_handles[i] = load_texture(gm.textures[i].path);
 				if (texture_handles[i] == INVALID_TEXTURE) {
-					// fall back to default albedo; doesn't matter which since the
-					// material will quote it via whichever slot it referenced.
 					texture_handles[i] = DEFAULT_ALBEDO;
 				}
 			}
@@ -251,6 +255,8 @@ namespace renderer {
 				prim_handles[i] = vk::create_mesh(gm.primitives[i].mesh);
 			}
 		}
+
+		vk::end_upload();
 
 		// 4. nodes — collapse to {mesh, material, transform} triples
 		ModelInternal& mi = models[slot];
@@ -373,12 +379,7 @@ namespace renderer {
 		VkCommandBuffer cmd = vk::current_cmd();
 		u32 image_index = vk::current_swapchain_image();
 
-		// --- frustum cull ---
-		//
-		// Compact draw_queue in place: anything whose world AABB falls outside
-		// the camera frustum is dropped before the counting sort runs. Unknown
-		// mesh handles are also dropped here, which simplifies the sort
-		// (no need to re-check validity downstream).
+		// frustum cull
 		{
 			Frustum f = build_frustum(frame_view, frame_projection);
 			u32 w = 0;
@@ -391,12 +392,7 @@ namespace renderer {
 			draw_count = w;
 		}
 
-		// --- mesh-first stable sort ---
-		//
-		// bindless materials make per-instance material switches free, so the
-		// optimal grouping is by mesh: collapse runs of identical mesh handles
-		// into a single vkCmdDrawIndexed with instanceCount=N. counting sort
-		// over the bounded MeshHandle range is O(n + MAX_MESHES) and stable.
+		// mesh-first stable sort
 		static PendingDraw sorted[vk::MAX_DRAWS_PER_FRAME];
 		u32 bucket[vk::MAX_MESHES] = {};
 

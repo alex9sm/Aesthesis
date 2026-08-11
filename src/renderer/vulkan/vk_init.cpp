@@ -2,6 +2,7 @@
 #include "vk_init.hpp"
 #include "vk_swapchain.hpp"
 #include "vk_memory.hpp"
+#include "vk_upload.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
 #include "vk_targets.hpp"
@@ -219,6 +220,7 @@ namespace vk {
 		if (!pick_physical_device()) return false;
 		if (!create_device()) return false;
 		if (!init_memory()) return false;
+		if (!init_upload()) return false;
 		if (!create_swapchain()) return false;
 		if (!init_frames()) return false;
 		if (!init_meshes()) return false;
@@ -260,6 +262,7 @@ namespace vk {
 			shutdown_meshes();
 			shutdown_frames();
 			destroy_swapchain();
+			shutdown_upload();
 			shutdown_memory();
 			vkDestroyDevice(ctx.device, nullptr);
 		}

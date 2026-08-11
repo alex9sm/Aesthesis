@@ -2,6 +2,7 @@
 #include "vk_cubemap.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
+#include "vk_upload.hpp"
 #include "vk_ibl.hpp"
 #include "cubemap.hpp"
 #include "log.hpp"
@@ -67,32 +68,6 @@ namespace vk {
 		VkDeviceSize face_bytes = (VkDeviceSize)size * size * 4;
 		VkDeviceSize total_bytes = face_bytes * 6;
 
-		// --- staging buffer holding all 6 faces packed back-to-back ---
-		VkBuffer staging = VK_NULL_HANDLE;
-		VmaAllocation staging_alloc = {};
-		VmaAllocationInfo staging_info = {};
-
-		VkBufferCreateInfo sb_ci = {};
-		sb_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		sb_ci.size = total_bytes;
-		sb_ci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		sb_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-		VmaAllocationCreateInfo sb_alloc_ci = {};
-		sb_alloc_ci.usage = VMA_MEMORY_USAGE_AUTO;
-		sb_alloc_ci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-			| VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-		if (vmaCreateBuffer(a, &sb_ci, &sb_alloc_ci, &staging, &staging_alloc, &staging_info) != VK_SUCCESS) {
-			logger::error("vmaCreateBuffer (cubemap staging) failed");
-			return false;
-		}
-
-		u8* dst = (u8*)staging_info.pMappedData;
-		for (u32 f = 0; f < 6; f++) {
-			memory::copy(dst + f * face_bytes, faces.pixels[f], (usize)face_bytes);
-		}
-
 		// --- destination image: cube-compatible, 6 array layers, full mip chain ---
 		VkImageCreateInfo img_ci = {};
 		img_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -115,30 +90,25 @@ namespace vk {
 
 		if (vmaCreateImage(a, &img_ci, &img_alloc_ci, &out->source_image, &out->source_alloc, nullptr) != VK_SUCCESS) {
 			logger::error("vmaCreateImage (cubemap source) failed");
-			vmaDestroyBuffer(a, staging, staging_alloc);
 			return false;
 		}
 
-		// --- transient command buffer ---
-		VkCommandPool pool = VK_NULL_HANDLE;
-		VkCommandPoolCreateInfo pool_ci = {};
-		pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		pool_ci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-		pool_ci.queueFamilyIndex = c.graphics_queue_index;
-		vkCreateCommandPool(c.device, &pool_ci, nullptr, &pool);
+		VkCommandBuffer cmd = begin_upload();
 
-		VkCommandBuffer cmd = VK_NULL_HANDLE;
-		VkCommandBufferAllocateInfo ai = {};
-		ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		ai.commandPool = pool;
-		ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		ai.commandBufferCount = 1;
-		vkAllocateCommandBuffers(c.device, &ai, &cmd);
+		// --- staging block holding all 6 faces packed back-to-back ---
+		StagingBlock staging = {};
+		if (!stage_alloc(total_bytes, &staging)) {
+			end_upload();
+			vmaDestroyImage(a, out->source_image, out->source_alloc);
+			out->source_image = VK_NULL_HANDLE;
+			out->source_alloc = {};
+			return false;
+		}
 
-		VkCommandBufferBeginInfo bi = {};
-		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		vkBeginCommandBuffer(cmd, &bi);
+		u8* dst = (u8*)staging.mapped;
+		for (u32 f = 0; f < 6; f++) {
+			memory::copy(dst + f * face_bytes, faces.pixels[f], (usize)face_bytes);
+		}
 
 		// --- transition all mips / all 6 layers UNDEFINED -> TRANSFER_DST ---
 		VkImageMemoryBarrier barrier = {};
@@ -172,7 +142,7 @@ namespace vk {
 			regions[f].imageOffset = { 0, 0, 0 };
 			regions[f].imageExtent = { size, size, 1 };
 		}
-		vkCmdCopyBufferToImage(cmd, staging, out->source_image,
+		vkCmdCopyBufferToImage(cmd, staging.buffer, out->source_image,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions);
 
 		// --- generate mip chain across all 6 layers ---
@@ -238,17 +208,7 @@ namespace vk {
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-		vkEndCommandBuffer(cmd);
-
-		VkSubmitInfo submit = {};
-		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submit.commandBufferCount = 1;
-		submit.pCommandBuffers = &cmd;
-		vkQueueSubmit(c.graphics_queue, 1, &submit, VK_NULL_HANDLE);
-		vkQueueWaitIdle(c.graphics_queue);
-
-		vkDestroyCommandPool(c.device, pool, nullptr);
-		vmaDestroyBuffer(a, staging, staging_alloc);
+		end_upload();
 
 		// --- cube image view (all 6 layers, all mips) ---
 		VkImageViewCreateInfo view_ci = {};
@@ -263,6 +223,7 @@ namespace vk {
 		view_ci.subresourceRange.layerCount = 6;
 		if (vkCreateImageView(c.device, &view_ci, nullptr, &out->source_view) != VK_SUCCESS) {
 			logger::error("vkCreateImageView (cubemap) failed");
+			flush_upload();
 			vmaDestroyImage(a, out->source_image, out->source_alloc);
 			out->source_image = VK_NULL_HANDLE;
 			out->source_alloc = {};

@@ -29,8 +29,5 @@ static_assert(sizeof(i32) == 4, "i32 not 4 bytes.");
 static_assert(sizeof(i64) == 8, "i64 not 8 bytes.");
 
 static_assert(sizeof(byte) == 1, "byte not 1 byte.");
-static_assert(sizeof(usize) == sizeof(void*), "usize not 8 bytes.");
-static_assert(sizeof(isize) == sizeof(void*), "isize not 8 bytes.");
-
-#define KILOBYTES(n) ((usize)(n) * 1024)
-#define MEGABYTES(n) ((usize)(n) * 1024 * 1024)
+static_assert(sizeof(usize) == sizeof(void*), "usize not pointer-sized.");
+static_assert(sizeof(isize) == sizeof(void*), "isize not pointer-sized.");

@@ -1,7 +1,138 @@
 #pragma once
 
 #include "types.hpp"
-#include <math.h>
+
+// ---------------------------------------------------------------------------
+// Scalar math. These live in namespace math:: rather than shadowing the libc
+// names at global scope, because stb_image.h / stb_truetype.h pull in <math.h>
+// in the same translation units and would collide.
+//
+// sqrt maps to a single SQRTSS/SQRTSD when SSE2 is available (always on x64).
+// Define AE_MATH_SSE2 as 0 to force the portable Newton-Raphson path instead.
+// ---------------------------------------------------------------------------
+
+#if !defined(AE_MATH_SSE2)
+	#if defined(_M_X64) || defined(_M_AMD64) || defined(__x86_64__) || defined(__SSE2__)
+		#define AE_MATH_SSE2 1
+	#else
+		#define AE_MATH_SSE2 0
+	#endif
+#endif
+
+#if AE_MATH_SSE2
+	#include <emmintrin.h>
+#endif
+
+namespace math {
+
+	namespace detail {
+
+		union F32Bits { f32 f; u32 u; };
+		union F64Bits { f64 f; u64 u; };
+		constexpr f32 DP1 = 0.78515625f;
+		constexpr f32 DP2 = 2.4187564849853515625e-4f;
+		constexpr f32 DP3 = 3.77489497744594108e-8f;
+
+		constexpr f32 FOUR_OVER_PI = 1.27323954473516f;
+
+		inline f32 sin_poly(f32 x, f32 z) {
+			return ((-1.9515295891e-4f * z + 8.3321608736e-3f) * z
+				- 1.6666654611e-1f) * z * x + x;
+		}
+
+		inline f32 cos_poly(f32 z) {
+			return ((2.443315711809948e-5f * z - 1.388731625493765e-3f) * z
+				+ 4.166664568298827e-2f) * z * z - 0.5f * z + 1.0f;
+		}
+
+	}
+
+	inline f32 abs(f32 x) {
+		detail::F32Bits b;
+		b.f = x;
+		b.u &= 0x7FFFFFFFu;
+		return b.f;
+	}
+
+	inline f32 sqrt(f32 x) {
+#if AE_MATH_SSE2
+		return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));
+#else
+		if (!(x > 0.0f)) return 0.0f;
+		detail::F32Bits b;
+		b.f = x;
+		b.u = (b.u >> 1) + 0x1FC00000u;
+		f32 r = b.f;
+		r = 0.5f * (r + x / r);
+		r = 0.5f * (r + x / r);
+		r = 0.5f * (r + x / r);
+		return r;
+#endif
+	}
+
+	inline f64 sqrt(f64 x) {
+#if AE_MATH_SSE2
+		return _mm_cvtsd_f64(_mm_sqrt_sd(_mm_setzero_pd(), _mm_set_sd(x)));
+#else
+		if (!(x > 0.0)) return 0.0;
+		detail::F64Bits b;
+		b.f = x;
+		b.u = (b.u >> 1) + 0x1FF8000000000000ull;
+		f64 r = b.f;
+		r = 0.5 * (r + x / r);
+		r = 0.5 * (r + x / r);
+		r = 0.5 * (r + x / r);
+		r = 0.5 * (r + x / r);
+		return r;
+#endif
+	}
+
+	inline f32 sin(f32 x) {
+
+		f32 sign = 1.0f;
+		if (x < 0.0f) { x = -x; sign = -1.0f; }
+
+		i32 j = (i32)(x * detail::FOUR_OVER_PI);   // octant index
+		f32 y = (f32)j;
+		if (j & 1) { j += 1; y += 1.0f; }
+		j &= 7;
+		if (j > 3) { sign = -sign; j -= 4; }
+
+		x = ((x - y * detail::DP1) - y * detail::DP2) - y * detail::DP3;
+
+		f32 z = x * x;
+		f32 r = (j == 1 || j == 2) ? detail::cos_poly(z) : detail::sin_poly(x, z);
+
+		return sign * r;
+
+	}
+
+	inline f32 cos(f32 x) {
+
+		x = abs(x);
+		f32 sign = 1.0f;
+
+		i32 j = (i32)(x * detail::FOUR_OVER_PI);
+		f32 y = (f32)j;
+		if (j & 1) { j += 1; y += 1.0f; }
+		j &= 7;
+		if (j > 3) { sign = -sign; j -= 4; }
+		if (j > 1) { sign = -sign; }
+
+		x = ((x - y * detail::DP1) - y * detail::DP2) - y * detail::DP3;
+
+		f32 z = x * x;
+		f32 r = (j == 1 || j == 2) ? detail::sin_poly(x, z) : detail::cos_poly(z);
+
+		return sign * r;
+
+	}
+
+	inline f32 tan(f32 x) {
+		return sin(x) / cos(x);
+	}
+
+}
 
 struct vec2 { f32 x, y; };
 struct vec3 { f32 x, y, z; };
@@ -17,7 +148,7 @@ inline vec2& operator+=(vec2& a, vec2 b) { a.x += b.x; a.y += b.y; return a; }
 
 inline f32  dot(vec2 a, vec2 b) { return a.x * b.x + a.y * b.y; }
 inline f32  length_sq(vec2 v) { return dot(v, v); }
-inline f32  length(vec2 v) { return sqrtf(length_sq(v)); }
+inline f32  length(vec2 v) { return math::sqrt(length_sq(v)); }
 inline vec2 normalize(vec2 v) { f32 l = length(v); return { v.x / l, v.y / l }; }
 
 inline vec3 operator+(vec3 a, vec3 b) { return { a.x + b.x, a.y + b.y, a.z + b.z }; }
@@ -29,7 +160,7 @@ inline vec3& operator+=(vec3& a, vec3 b) { a.x += b.x; a.y += b.y; a.z += b.z; r
 
 inline f32  dot(vec3 a, vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 inline f32  length_sq(vec3 v) { return dot(v, v); }
-inline f32  length(vec3 v) { return sqrtf(length_sq(v)); }
+inline f32  length(vec3 v) { return math::sqrt(length_sq(v)); }
 inline vec3 normalize(vec3 v) { f32 l = length(v); return { v.x / l, v.y / l, v.z / l }; }
 
 inline vec3 cross(vec3 a, vec3 b) {
@@ -90,8 +221,8 @@ inline mat4 mat4_scale(f32 s) {
 }
 
 inline mat4 mat4_rotate(f32 angle, vec3 axis) {
-    f32 c = cosf(angle);
-    f32 s = sinf(angle);
+    f32 c = math::cos(angle);
+    f32 s = math::sin(angle);
     f32 t = 1.0f - c;
 
     mat4 m = {};
@@ -125,7 +256,7 @@ inline mat4 mat4_look_at(vec3 eye, vec3 center, vec3 up) {
 }
 
 inline mat4 mat4_perspective(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
-    f32 f = 1.0f / tanf(fov_y * 0.5f);
+    f32 f = 1.0f / math::tan(fov_y * 0.5f);
     mat4 m = {};
     m.col[0][0] = f / aspect;
     m.col[1][1] = f;
@@ -138,7 +269,7 @@ inline mat4 mat4_perspective(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
 // Vulkan-corrected perspective: clip-space Z is [0, 1] (vs GL's [-1, 1]).
 // Pair with a viewport that flips Y so GL-style winding/UV conventions hold.
 inline mat4 mat4_perspective_vk(f32 fov_y, f32 aspect, f32 z_near, f32 z_far) {
-    f32 f = 1.0f / tanf(fov_y * 0.5f);
+    f32 f = 1.0f / math::tan(fov_y * 0.5f);
     mat4 m = {};
     m.col[0][0] = f / aspect;
     m.col[1][1] = f;
@@ -202,7 +333,7 @@ inline mat4 mat4_inverse(mat4 m) {
     f32 b10 = a21*a33 - a23*a31, b11 = a22*a33 - a23*a32;
 
     f32 det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
-    if (fabsf(det) < 1e-12f) return mat4_identity();
+    if (math::abs(det) < 1e-12f) return mat4_identity();
     f32 inv_det = 1.0f / det;
 
     mat4 r;
@@ -243,7 +374,7 @@ inline dvec2& operator+=(dvec2& a, dvec2 b) { a.x += b.x; a.y += b.y; return a; 
 inline dvec2& operator-=(dvec2& a, dvec2 b) { a.x -= b.x; a.y -= b.y; return a; }
 inline f64   dot_d(dvec2 a, dvec2 b)      { return a.x * b.x + a.y * b.y; }
 inline f64   length_sq(dvec2 v)           { return v.x * v.x + v.y * v.y; }
-inline f64   length(dvec2 v)              { return sqrt(length_sq(v)); }
+inline f64   length(dvec2 v)              { return math::sqrt(length_sq(v)); }
 inline dvec2 normalize_d(dvec2 v)         { f64 l = length(v); return { v.x / l, v.y / l }; }
 inline vec2  to_vec2(dvec2 v)             { return { (f32)v.x, (f32)v.y }; }
 
@@ -268,9 +399,9 @@ inline AABB aabb_transform(const AABB& local, mat4 m) {
     vec3 extent = (local.max - local.min) * 0.5f;
     vec3 new_center = mat4_transform_point(m, center);
     vec3 new_extent = {
-        fabsf(m.col[0][0]) * extent.x + fabsf(m.col[1][0]) * extent.y + fabsf(m.col[2][0]) * extent.z,
-        fabsf(m.col[0][1]) * extent.x + fabsf(m.col[1][1]) * extent.y + fabsf(m.col[2][1]) * extent.z,
-        fabsf(m.col[0][2]) * extent.x + fabsf(m.col[1][2]) * extent.y + fabsf(m.col[2][2]) * extent.z
+        math::abs(m.col[0][0]) * extent.x + math::abs(m.col[1][0]) * extent.y + math::abs(m.col[2][0]) * extent.z,
+        math::abs(m.col[0][1]) * extent.x + math::abs(m.col[1][1]) * extent.y + math::abs(m.col[2][1]) * extent.z,
+        math::abs(m.col[0][2]) * extent.x + math::abs(m.col[1][2]) * extent.y + math::abs(m.col[2][2]) * extent.z
     };
 
     return { new_center - new_extent, new_center + new_extent };
@@ -290,7 +421,7 @@ inline Frustum frustum_from_vp(mat4 vp) {
     f.planes[5] = { vp.col[0][3]-vp.col[0][2], vp.col[1][3]-vp.col[1][2], vp.col[2][3]-vp.col[2][2], vp.col[3][3]-vp.col[3][2] };
 
     for (int i = 0; i < 6; i++) {
-        f32 len = sqrtf(f.planes[i].x*f.planes[i].x + f.planes[i].y*f.planes[i].y + f.planes[i].z*f.planes[i].z);
+        f32 len = math::sqrt(f.planes[i].x*f.planes[i].x + f.planes[i].y*f.planes[i].y + f.planes[i].z*f.planes[i].z);
         if (len > 0.0001f) {
             f32 inv = 1.0f / len;
             f.planes[i].x *= inv;

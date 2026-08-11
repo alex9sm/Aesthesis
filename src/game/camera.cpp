@@ -19,11 +19,11 @@ namespace camera {
 	}
 
 	vec3 forward(const Camera& c) {
-		f32 cp = cosf(c.pitch);
+		f32 cp = math::cos(c.pitch);
 		return {
-			-sinf(c.yaw) * cp,
-			 sinf(c.pitch),
-			-cosf(c.yaw) * cp
+			-math::sin(c.yaw) * cp,
+			 math::sin(c.pitch),
+			-math::cos(c.yaw) * cp
 		};
 	}
 

@@ -33,11 +33,12 @@ namespace arr {
 	}
 
 	template<typename T>
-	void array_reserve(Array<T>* arr, usize new_cap) {
+	bool array_reserve(Array<T>* arr, usize new_cap) {
 
-		if (new_cap <= arr->capacity) return;
+		if (new_cap <= arr->capacity) return true;
 
 		T* new_data = static_cast<T*>(memory::malloc(new_cap * sizeof(T)));
+		if (!new_data) return false;
 
 		if (arr->data) {
 			memory::copy(new_data, arr->data, arr->count * sizeof(T));
@@ -47,17 +48,21 @@ namespace arr {
 		arr->data = new_data;
 		arr->capacity = new_cap;
 
+		return true;
+
 	}
 
 	template<typename T>
-	void array_push(Array<T>* arr, T item) {
+	bool array_push(Array<T>* arr, T item) {
 
 		if (arr->count >= arr->capacity) {
 			usize new_cap = arr->capacity == 0 ? 8 : arr->capacity * 2;
-			array_reserve(arr, new_cap);
+			if (!array_reserve(arr, new_cap)) return false;
 		}
 
 		arr->data[arr->count++] = item;
+
+		return true;
 
 	}
 
@@ -69,13 +74,15 @@ namespace arr {
 	}
 
 	template<typename T>
-	void array_resize(Array<T>* arr, usize new_count) {
+	bool array_resize(Array<T>* arr, usize new_count) {
 
-		if (new_count > arr->capacity) {
-			array_reserve(arr, new_count);
+		if (new_count > arr->capacity && !array_reserve(arr, new_count)) {
+			return false;
 		}
 
 		arr->count = new_count;
+
+		return true;
 
 	}
 

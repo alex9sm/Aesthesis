@@ -1,8 +1,12 @@
 #include "log.hpp"
 #include "types.hpp"
 #include "string.hpp"
+#include <stdio.h>
 
+// The only OS-specific code in core/. Everything else runs on the C runtime.
+#if defined(_WIN32)
 extern "C" __declspec(dllimport) void __stdcall OutputDebugStringA(const char* str);
+#endif
 
 namespace logger {
 
@@ -19,24 +23,25 @@ namespace logger {
         if (level < min_level) return;
 
         char buffer[2048];
-        char* ptr = buffer;
-        usize remaining = sizeof(buffer);
-        usize prefix_len = str::length(prefix);
-        str::copy(ptr, prefix, remaining);
-        ptr += prefix_len;
-        remaining -= prefix_len;
-        int written = str::format_v(ptr, remaining, fmt, args);
+        constexpr usize CAP = sizeof(buffer);
+
+        usize len = str::copy(buffer, prefix, CAP);
+
+        int written = str::format_v(buffer + len, CAP - len, fmt, args);
         if (written > 0) {
-            ptr += written;
-            remaining -= written;
+            len += (usize)written;
+            // format_v reports the untruncated length; clamp to what it wrote.
+            if (len > CAP - 2) len = CAP - 2;
         }
 
-        if (remaining > 2) {
-            *ptr++ = '\n';
-            *ptr = '\0';
-        }
+        buffer[len++] = '\n';
+        buffer[len] = '\0';
 
+        fputs(buffer, stderr);
+
+#if defined(_WIN32)
         OutputDebugStringA(buffer);
+#endif
 
     }
 

@@ -3,6 +3,8 @@
 #include "memory.hpp"
 #include "Resource.h"
 
+#include <stdio.h>
+
 // NOTE: game provides create_game() which returns a GameInterface
 extern GameInterface create_game();
 
@@ -192,8 +194,21 @@ namespace win32 {
 
 namespace platform {
 
+	static void attach_console() {
+		if (!AttachConsole(ATTACH_PARENT_PROCESS) && !AllocConsole()) {
+			return;
+		}
+
+		FILE* f = nullptr;
+		freopen_s(&f, "CONOUT$", "w", stderr);
+		freopen_s(&f, "CONOUT$", "w", stdout);
+		setvbuf(stderr, nullptr, _IONBF, 0);
+	}
+
 	bool init(const char* title) {
 		win32::State* s = win32::get_state();
+
+		attach_console();
 
 		s->hinstance = GetModuleHandleA(nullptr);
 

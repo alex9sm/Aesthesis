@@ -1,7 +1,5 @@
 #include "string.hpp"
-#include <math.h>
-
-extern "C" __declspec(dllimport) int __cdecl wvsprintfA(char* buffer, const char* format, va_list args);
+#include <stdio.h>
 
 namespace str {
 
@@ -34,12 +32,12 @@ namespace str {
 
 	}
 
-	void copy(char* dst, const char* src, usize max) {
+	usize copy(char* dst, const char* src, usize max) {
 
-		if (!dst || max == 0) return;
+		if (!dst || max == 0) return 0;
 		if (!src) {
 			dst[0] = '\0';
-			return;
+			return 0;
 		}
 
 		usize i = 0;
@@ -49,13 +47,17 @@ namespace str {
 		}
 		dst[i] = '\0';
 
+		return i;
+
 	}
 
-	void concat(char* dst, const char* src, usize max) {
+	usize concat(char* dst, const char* src, usize max) {
 
+		if (!dst || max == 0) return 0;
 		usize dst_len = length(dst);
-		if (dst_len >= max) return;
-		copy(dst + dst_len, src, max - dst_len);
+		if (dst_len >= max - 1) return dst_len;
+
+		return dst_len + copy(dst + dst_len, src, max - dst_len);
 
 	}
 
@@ -115,16 +117,10 @@ namespace str {
 
 	int format(char* dst, usize max, const char* fmt, ...) {
 
-		if (!dst || max == 0) return 0;
-
 		va_list args;
 		va_start(args, fmt);
-		int result = wvsprintfA(dst, fmt, args);
+		int result = format_v(dst, max, fmt, args);
 		va_end(args);
-
-		if (result >= 0 && (usize)result >= max) {
-			dst[max - 1] = '\0';
-		}
 
 		return result;
 
@@ -133,61 +129,14 @@ namespace str {
 	int format_v(char* dst, usize max, const char* fmt, va_list args) {
 
 		if (!dst || max == 0) return 0;
-		int result = wvsprintfA(dst, fmt, args);
 
-		if (result >= 0 && (usize)result >= max) {
-			dst[max - 1] = '\0';
+		int result = ::vsnprintf(dst, max, fmt, args);
+		if (result < 0) {
+			dst[0] = '\0';
+			return 0;
 		}
 
 		return result;
-
-	}
-
-	int float_to_str(char* buf, usize max, f32 value) {
-
-		if (!buf || max == 0) return 0;
-
-		bool neg = value < 0.0f;
-		if (neg) value = -value;
-
-		i32 integer = (i32)value;
-		i32 frac = (i32)(((f64)value - (f64)integer) * 100.0 + 0.5);
-		if (frac >= 100) { integer++; frac = 0; }
-
-		if (neg)
-			return format(buf, max, "-%d.%02d", integer, frac);
-		else
-			return format(buf, max, "%d.%02d", integer, frac);
-
-	}
-
-	f32 str_to_float(const char* s) {
-
-		if (!s) return 0.0f;
-		while (*s == ' ' || *s == '\t') s++;
-		if (*s == '\0') return 0.0f;
-
-		f32 sign = 1.0f;
-		if (*s == '-') { sign = -1.0f; s++; }
-		else if (*s == '+') { s++; }
-
-		f32 result = 0.0f;
-		while (*s >= '0' && *s <= '9') {
-			result = result * 10.0f + (f32)(*s - '0');
-			s++;
-		}
-
-		if (*s == '.') {
-			s++;
-			f32 frac = 0.1f;
-			while (*s >= '0' && *s <= '9') {
-				result += (f32)(*s - '0') * frac;
-				frac *= 0.1f;
-				s++;
-			}
-		}
-
-		return sign * result;
 
 	}
 

@@ -8,6 +8,7 @@
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
 #include "vk_upload.hpp"
+#include "vk_shadow.hpp"
 #include "vk_depth_prepass.hpp"
 #include "vk_gbuffer.hpp"
 #include "vk_lighting.hpp"
@@ -348,6 +349,8 @@ namespace renderer {
 
 			g.misc = { 0.0f, 0.0f, 0.0f, 0.0f };
 
+			vk::compute_cascades(view, projection, g_sun_dir, g.cascade_view_proj, g.cascade_splits);
+
 			vk::update_globals(g);
 		}
 	}
@@ -373,11 +376,74 @@ namespace renderer {
 		}
 	}
 
+	static u32 build_batches(const PendingDraw* draws, u32 count,
+		PendingDraw* scratch, vk::DrawBatch* out_batches)
+	{
+		u32 bucket[vk::MAX_MESHES] = {};
+		for (u32 i = 0; i < count; i++) {
+			MeshHandle m = draws[i].mesh;
+			if (m == INVALID_MESH || m >= vk::MAX_MESHES) continue;
+			bucket[m]++;
+		}
+		// prefix-sum the bucket counts into write offsets.
+		u32 running = 0;
+		for (u32 m = 0; m < vk::MAX_MESHES; m++) {
+			u32 c = bucket[m];
+			bucket[m] = running;
+			running += c;
+		}
+		// scatter, preserving original order within each bucket (stable).
+		u32 sorted_count = 0;
+		for (u32 i = 0; i < count; i++) {
+			MeshHandle m = draws[i].mesh;
+			if (m == INVALID_MESH || m >= vk::MAX_MESHES) continue;
+			scratch[bucket[m]++] = draws[i];
+			sorted_count++;
+		}
+
+		u32 batch_count = 0;
+		u32 run_start = 0;
+		while (run_start < sorted_count) {
+			MeshHandle run_mesh = scratch[run_start].mesh;
+			u32 run_end = run_start + 1;
+			while (run_end < sorted_count && scratch[run_end].mesh == run_mesh) {
+				run_end++;
+			}
+
+			// first_instance must be the SSBO slot push_instance actually
+			// returns, not the local run_start index — they only coincide when
+			// this is the sole build_batches call of the frame. Two calls
+			// share one buffer (shadow batches, then camera batches), so the
+			// second call's SSBO slots start wherever the first left off.
+			u32 first_instance = 0;
+			for (u32 i = run_start; i < run_end; i++) {
+				vk::InstanceData id = {};
+				id.model = scratch[i].model;
+				id.normal_matrix = vk::compute_normal_matrix(scratch[i].model);
+				id.tint = scratch[i].tint;
+				id.material_id = scratch[i].material;
+				u32 idx = vk::push_instance(id);
+				if (i == run_start) first_instance = idx;
+			}
+
+			out_batches[batch_count++] = { run_mesh, first_instance, run_end - run_start };
+			run_start = run_end;
+		}
+		return batch_count;
+	}
+
 	void end_frame() {
 		if (!frame_active) return;
 
 		VkCommandBuffer cmd = vk::current_cmd();
 		u32 image_index = vk::current_swapchain_image();
+
+		vk::reset_instances();
+
+		// shadow batches: full, uncensored draw list no culling
+		static PendingDraw shadow_scratch[vk::MAX_DRAWS_PER_FRAME];
+		static vk::DrawBatch shadow_batches[vk::MAX_DRAWS_PER_FRAME];
+		u32 shadow_batch_count = build_batches(draw_queue, draw_count, shadow_scratch, shadow_batches);
 
 		// frustum cull
 		{
@@ -392,62 +458,13 @@ namespace renderer {
 			draw_count = w;
 		}
 
-		// mesh-first stable sort
 		static PendingDraw sorted[vk::MAX_DRAWS_PER_FRAME];
-		u32 bucket[vk::MAX_MESHES] = {};
-
-		for (u32 i = 0; i < draw_count; i++) {
-			MeshHandle m = draw_queue[i].mesh;
-			if (m == INVALID_MESH || m >= vk::MAX_MESHES) continue;
-			bucket[m]++;
-		}
-		// prefix-sum the bucket counts into write offsets.
-		u32 running = 0;
-		for (u32 m = 0; m < vk::MAX_MESHES; m++) {
-			u32 c = bucket[m];
-			bucket[m] = running;
-			running += c;
-		}
-		// scatter, preserving original order within each bucket (stable).
-		u32 sorted_count = 0;
-		for (u32 i = 0; i < draw_count; i++) {
-			MeshHandle m = draw_queue[i].mesh;
-			if (m == INVALID_MESH || m >= vk::MAX_MESHES) continue;
-			sorted[bucket[m]++] = draw_queue[i];
-			sorted_count++;
-		}
-
-		// --- write SSBO + build batches ---
-
-		vk::reset_instances();
 		static vk::DrawBatch batches[vk::MAX_DRAWS_PER_FRAME];
-		u32 batch_count = 0;
+		u32 batch_count = build_batches(draw_queue, draw_count, sorted, batches);
 
-		u32 run_start = 0;
-		while (run_start < sorted_count) {
-			MeshHandle run_mesh = sorted[run_start].mesh;
-			u32 run_end = run_start + 1;
-			while (run_end < sorted_count && sorted[run_end].mesh == run_mesh) {
-				run_end++;
-			}
-
-			for (u32 i = run_start; i < run_end; i++) {
-				vk::InstanceData id = {};
-				id.model = sorted[i].model;
-				id.normal_matrix = vk::compute_normal_matrix(sorted[i].model);
-				id.tint = sorted[i].tint;
-				id.material_id = sorted[i].material;
-				vk::push_instance(id);
-			}
-
-			batches[batch_count++] = { run_mesh, run_start, run_end - run_start };
-			run_start = run_end;
-		}
-
-		// patch the point light count into the UBO now that all submit_light
-		// calls have been made (the UBO was uploaded before lights were pushed).
 		vk::patch_globals_misc({ (f32)vk::light_count(), 0.0f, 0.0f, 0.0f });
 
+		vk::execute_shadow_pass(cmd, shadow_batches, shadow_batch_count);
 		vk::execute_depth_prepass(cmd, batches, batch_count);
 		vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);

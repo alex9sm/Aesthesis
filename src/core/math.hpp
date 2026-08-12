@@ -302,6 +302,20 @@ inline mat4 mat4_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 z_near, f32
     return m;
 }
 
+// Vulkan-corrected ortho: clip-space Z is [0, 1] (vs GL's [-1, 1]), matching
+// mat4_perspective_vk. Same [left,right]/[bottom,top] convention as mat4_ortho.
+inline mat4 mat4_ortho_vk(f32 left, f32 right, f32 bottom, f32 top, f32 z_near, f32 z_far) {
+    mat4 m = {};
+    m.col[0][0] = 2.0f / (right - left);
+    m.col[1][1] = 2.0f / (top - bottom);
+    m.col[2][2] = -1.0f / (z_far - z_near);
+    m.col[3][0] = -(right + left) / (right - left);
+    m.col[3][1] = -(top + bottom) / (top - bottom);
+    m.col[3][2] = -z_near / (z_far - z_near);
+    m.col[3][3] = 1.0f;
+    return m;
+}
+
 inline vec3 mat4_transform_point(mat4 m, vec3 p) {
     return {
         m.col[0][0]*p.x + m.col[1][0]*p.y + m.col[2][0]*p.z + m.col[3][0],

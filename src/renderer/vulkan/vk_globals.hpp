@@ -13,11 +13,13 @@ namespace vk {
 		mat4 proj;
 		mat4 inv_view;
 		mat4 inv_proj;
-		vec4 cam_pos;        // xyz world-space camera position; w = z_near
-		vec4 sun_dir;        // xyz world-space direction TO light; w = z_far
-		vec4 sun_color;      // rgb radiance; w intensity multiplier
-		vec4 viewport_size;  // x=width, y=height, z=1/w, w=1/h
-		vec4 misc;           // x=point_light_count (as float), y/z/w reserved
+		vec4 cam_pos;
+		vec4 sun_dir;
+		vec4 sun_color;
+		vec4 viewport_size;
+		vec4 misc;
+		mat4 cascade_view_proj[3];
+		vec4 cascade_splits; // x/y/z = view-space far distance of cascades 0/1/2
 	};
 
 	bool init_globals();

@@ -97,6 +97,10 @@ namespace vk {
 		rs.cullMode = spec.cull;
 		rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		rs.lineWidth = 1.0f;
+		rs.depthBiasEnable = spec.depthBiasEnable ? VK_TRUE : VK_FALSE;
+		rs.depthBiasConstantFactor = spec.depth_bias_constant;
+		rs.depthBiasSlopeFactor = spec.depth_bias_slope;
+
 
 		VkPipelineMultisampleStateCreateInfo ms = {};
 		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;

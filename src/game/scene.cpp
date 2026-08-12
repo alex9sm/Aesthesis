@@ -20,11 +20,9 @@ namespace scene {
 		helmet = renderer::load_model("assets/models/damagedhelmet/DamagedHelmet.gltf");
 		chess = renderer::load_model("assets/models/chess/chess.gltf");
 
-		renderer::set_sun({ 0.38f, 1.0f, 0.41f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
+		renderer::set_sun({ 0.38f, 1.0f, 0.41f }, { 1.0f, 1.0f, 1.0f }, 4.0f);
 		env_cubemap = renderer::load_cubemap("field", 1.0f);
-		if (env_cubemap != renderer::INVALID_CUBEMAP) {
-			renderer::set_environment_cubemap(env_cubemap);
-		}
+		renderer::set_environment_cubemap(env_cubemap);
 
 		hud_font = renderer::load_font("assets/textures/global/NeueHaasDisplayMediu.ttf", 24.0f);
 		if (hud_font == renderer::INVALID_FONT) {
@@ -34,13 +32,9 @@ namespace scene {
 	}
 
 	void shutdown() {
-		if (hud_font != renderer::INVALID_FONT) {
-			renderer::unload_font(hud_font);
-		}
-		if (env_cubemap != renderer::INVALID_CUBEMAP) {
-			renderer::clear_environment_cubemap();
-			renderer::unload_cubemap(env_cubemap);
-		}
+		renderer::unload_font(hud_font);
+		renderer::clear_environment_cubemap();
+		renderer::unload_cubemap(env_cubemap);
 		renderer::unload_model(helmet);
 		renderer::unload_model(chess);
 	}
@@ -51,9 +45,9 @@ namespace scene {
 		renderer::submit_model(chess);
 
 		// test point lights
-		//renderer::submit_light({ 4.0f, 4.0f, 0.0f },  { 1.0f, 0.3f, 0.1f }, 10.0f, 30.0f);
-		//renderer::submit_light({-4.0f, 4.0f, 0.0f },  { 0.1f, 0.3f, 1.0f }, 10.0f, 30.0f);
-		//renderer::submit_light({ 0.0f, 5.0f, 8.0f },  { 0.2f, 1.0f, 0.2f }, 10.0f, 30.0f);
+		// renderer::submit_light({ 4.0f, 4.0f, 0.0f },  { 1.0f, 0.3f, 0.1f }, 10.0f, 30.0f);
+		// renderer::submit_light({-4.0f, 4.0f, 0.0f },  { 0.1f, 0.3f, 1.0f }, 10.0f, 30.0f);
+		// renderer::submit_light({ 0.0f, 5.0f, 8.0f },  { 0.2f, 1.0f, 0.2f }, 10.0f, 30.0f);
 
 		// --- FPS HUD ---
 		fps_accum_time   += dt;
@@ -65,12 +59,9 @@ namespace scene {
 			fps_accum_frames = 0;
 		}
 
-		if (hud_font != renderer::INVALID_FONT) {
-			// dark translucent backdrop behind the counter for readability
-			renderer::draw_2d_rect(8.0f, 8.0f, 130.0f, 32.0f, { 0.0f, 0.0f, 0.0f, 0.55f });
-			renderer::draw_text(hud_font, fps_text, 16.0f, 12.0f, 1.0f,
-				{ 1.0f, 1.0f, 1.0f, 1.0f });
-		}
+		// dark translucent backdrop behind the counter for readability
+		renderer::draw_2d_rect(8.0f, 8.0f, 130.0f, 32.0f, { 0.0f, 0.0f, 0.0f, 0.55f });
+		renderer::draw_text(hud_font, fps_text, 16.0f, 12.0f, 1.0f, { 1.0f, 1.0f, 1.0f, 1.0f });
 	}
 
 }

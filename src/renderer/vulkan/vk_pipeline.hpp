@@ -39,10 +39,15 @@ namespace vk {
 		VkFormat        depth_format;  // VK_FORMAT_UNDEFINED == no depth attachment
 		BlendMode       blend;         // applied to every color attachment
 
+		//shadow fields
+		VkBool32 depthBiasEnable;
+		f32 depth_bias_constant;
+		f32 depth_bias_slope;
+
 		// pipeline layout
 		const VkDescriptorSetLayout* set_layouts;
 		u32                          set_layout_count;
-		const VkPushConstantRange*   push_constant; // null => none
+		const VkPushConstantRange*   push_constant;
 	};
 
 	bool create_graphics_pipeline(const GraphicsPipelineSpec& spec,

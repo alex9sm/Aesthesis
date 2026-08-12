@@ -965,10 +965,6 @@ namespace vk {
 			}
 		}
 		active_env = handle;
-
-		// Descriptor sets may have been used by an in-flight frame; flush so
-		// the rewrite is safe. set_environment_cubemap is conventionally a
-		// between-frames operation, so the wait is brief.
 		vkDeviceWaitIdle(context().device);
 		write_descriptors();
 	}

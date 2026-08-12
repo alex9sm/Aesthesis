@@ -7,6 +7,7 @@
 #include "vk_mesh.hpp"
 #include "vk_targets.hpp"
 #include "vk_globals.hpp"
+#include "vk_shadow.hpp"
 #include "vk_instance.hpp"
 #include "vk_lights.hpp"
 #include "vk_texture.hpp"
@@ -226,6 +227,7 @@ namespace vk {
 		if (!init_meshes()) return false;
 		if (!init_targets(swapchain().extent)) return false;
 		if (!init_globals()) return false;
+		if (!init_shadow()) return false;
 		if (!init_instances()) return false;
 		if (!init_lights()) return false;
 		if (!init_textures()) return false;
@@ -257,6 +259,7 @@ namespace vk {
 			shutdown_textures();
 			shutdown_lights();
 			shutdown_instances();
+			shutdown_shadow();
 			shutdown_globals();
 			shutdown_targets();
 			shutdown_meshes();

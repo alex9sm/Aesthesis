@@ -36,7 +36,9 @@ namespace renderer {
 		DEBUG_NORMAL   = 2,
 		DEBUG_MATERIAL = 3,
 		DEBUG_DEPTH    = 4,
-		DEBUG_COUNT    = 5
+		DEBUG_CASCADES = 5,
+		DEBUG_SHADOW   = 6,
+		DEBUG_COUNT    = 7
 	};
 
 	// developer-facing material description. unset texture handles default to

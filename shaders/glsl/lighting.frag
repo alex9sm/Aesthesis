@@ -2,6 +2,7 @@
 
 #include "include/octahedral.glsl"
 #include "include/ibl.glsl"
+#include "include/shadow.glsl"
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
@@ -112,26 +113,8 @@ void main() {
 
     // --- CSM: pick a cascade by view-space depth, sample with hardware PCF ---
     float view_depth = -(g.view * vec4(P, 1.0)).z;
-    int cascade = (view_depth < g.cascade_splits.x) ? 0
-                : (view_depth < g.cascade_splits.y) ? 1
-                : 2;
-
-    // Normal-offset bias: push the sampled point off the surface along its
-    // normal before projecting into light space. Format-independent (unlike
-    // rasterizer depthBias, whose scale depends on the depth format — D32_SFLOAT
-    // doesn't behave like the fixed-point formats those constants assume) and
-    // also helps peter-panning less than an equivalent constant-depth bias.
-    const float SHADOW_NORMAL_BIAS = 0.05;
-    vec3 shadow_pos = P + N * SHADOW_NORMAL_BIAS;
-
-    vec4 light_clip = g.cascade_view_proj[cascade] * vec4(shadow_pos, 1.0);
-    vec3 light_ndc  = light_clip.xyz / light_clip.w;
-    // shadow map was rendered with a Y-flipped viewport (matches depth_prepass'
-    // winding convention), so the v coordinate is inverted relative to the
-    // naive ndc->uv mapping — same correction gbuffer depth reconstruction
-    // above applies in the other direction.
-    vec2 shadow_uv = vec2(light_ndc.x * 0.5 + 0.5, 0.5 - light_ndc.y * 0.5);
-    float shadow = texture(t_shadow, vec4(shadow_uv, float(cascade), light_ndc.z));
+    int   cascade    = select_cascade(view_depth, g.cascade_splits);
+    float shadow     = sample_shadow(t_shadow, g.cascade_view_proj[cascade], cascade, P, N);
 
     vec3 radiance = g.sun_color.rgb * g.sun_color.w;
     vec3 direct   = (diffuse + spec) * radiance * NdotL * shadow;

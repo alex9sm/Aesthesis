@@ -2,15 +2,6 @@
 
 #include "types.hpp"
 
-// ---------------------------------------------------------------------------
-// Scalar math. These live in namespace math:: rather than shadowing the libc
-// names at global scope, because stb_image.h / stb_truetype.h pull in <math.h>
-// in the same translation units and would collide.
-//
-// sqrt maps to a single SQRTSS/SQRTSD when SSE2 is available (always on x64).
-// Define AE_MATH_SSE2 as 0 to force the portable Newton-Raphson path instead.
-// ---------------------------------------------------------------------------
-
 #if !defined(AE_MATH_SSE2)
 	#if defined(_M_X64) || defined(_M_AMD64) || defined(__x86_64__) || defined(__SSE2__)
 		#define AE_MATH_SSE2 1
@@ -34,6 +25,9 @@ namespace math {
 		constexpr f32 DP3 = 3.77489497744594108e-8f;
 
 		constexpr f32 FOUR_OVER_PI = 1.27323954473516f;
+		constexpr f32 SQRT2  = 1.41421356237309505f;
+		constexpr f32 LN2    = 0.69314718055994531f;
+		constexpr f32 LOG2_E = 1.44269504088896341f;
 
 		inline f32 sin_poly(f32 x, f32 z) {
 			return ((-1.9515295891e-4f * z + 8.3321608736e-3f) * z
@@ -130,6 +124,61 @@ namespace math {
 
 	inline f32 tan(f32 x) {
 		return sin(x) / cos(x);
+	}
+
+	inline f32 log2(f32 x) {
+		if (!(x > 0.0f)) return 0.0f;
+
+		detail::F32Bits b;
+		b.f = x;
+		i32 e = (i32)((b.u >> 23) & 0xFFu) - 127;
+		b.u = (b.u & 0x807FFFFFu) | 0x3F800000u;
+		f32 m = b.f;
+		if (m > detail::SQRT2) { m *= 0.5f; e += 1; }
+
+		f32 t  = (m - 1.0f) / (m + 1.0f);
+		f32 t2 = t * t;
+		f32 p  = 1.0f / 9.0f;
+		p = p * t2 + (1.0f / 7.0f);
+		p = p * t2 + (1.0f / 5.0f);
+		p = p * t2 + (1.0f / 3.0f);
+		p = p * t2 + 1.0f;
+
+		return 2.0f * t * p * detail::LOG2_E + (f32)e;
+	}
+
+	inline f32 exp2(f32 x) {
+		if (x >= 128.0f)  return 3.402823466e38f;
+		if (x <= -127.0f) return 0.0f;
+
+		i32 n = (i32)(x + (x >= 0.0f ? 0.5f : -0.5f));
+		f32 u = (x - (f32)n) * detail::LN2;
+
+		f32 p = 1.0f / 5040.0f;
+		p = p * u + (1.0f / 720.0f);
+		p = p * u + (1.0f / 120.0f);
+		p = p * u + (1.0f / 24.0f);
+		p = p * u + (1.0f / 6.0f);
+		p = p * u + 0.5f;
+		p = p * u + 1.0f;
+		p = p * u + 1.0f;
+
+		detail::F32Bits b;
+		b.u = (u32)((n + 127) << 23);
+		return p * b.f;
+	}
+
+	inline f32 pow(f32 x, f32 y) {
+		if (y == 0.0f) return 1.0f;
+		if (x == 0.0f) return 0.0f;
+
+		f32 sign = 1.0f;
+		if (x < 0.0f) {
+			if ((f32)(i32)y != y) return 0.0f;
+			if ((i32)y & 1) sign = -1.0f;
+			x = -x;
+		}
+		return sign * exp2(y * log2(x));
 	}
 
 }

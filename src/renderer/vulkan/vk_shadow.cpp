@@ -8,14 +8,12 @@
 #include "vk_mesh.hpp"
 #include "log.hpp"
 
-#include <math.h> // powf, for the log/uniform cascade-split blend
-
 namespace vk {
 
 	static VkImage       shadow_image  = VK_NULL_HANDLE;
 	static VmaAllocation shadow_alloc  = VK_NULL_HANDLE;
-	static VkImageView   layer_views[CASCADE_COUNT] = {}; // per-cascade, for rendering
-	static VkImageView   array_view    = VK_NULL_HANDLE;  // full array, for sampling
+	static VkImageView   layer_views[CASCADE_COUNT] = {};
+	static VkImageView   array_view    = VK_NULL_HANDLE;
 	static VkImageLayout shadow_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 	static VkSampler     shadow_sampler = VK_NULL_HANDLE;
 
@@ -53,8 +51,7 @@ namespace vk {
 			return false;
 		}
 
-		// one single-layer view per cascade, bound as the depth attachment when
-		// rendering that cascade.
+		// one single-layer view per cascade
 		for (u32 i = 0; i < CASCADE_COUNT; i++) {
 			VkImageViewCreateInfo vci = {};
 			vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -98,8 +95,6 @@ namespace vk {
 		s.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		s.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		s.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-		// depth=1 (max) outside the map -> compare (ref < 1) passes -> reads as
-		// unshadowed, so geometry past a cascade's fitted bounds isn't shadowed.
 		s.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 		s.compareEnable = VK_TRUE;
 		s.compareOp = VK_COMPARE_OP_LESS;
@@ -147,9 +142,7 @@ namespace vk {
 		pc.offset = 0;
 		pc.size = sizeof(CascadePC);
 
-		// depth-only, no fragment stage. same back-face cull + Y-flipped
-		// viewport convention as depth_prepass so winding stays consistent
-		// with the rest of the renderer; bias fights acne from the cull choice.
+		// depth-only, no fragment stage.
 		GraphicsPipelineSpec spec = {};
 		spec.vs_path = "shaders/spv/shadow_depth.vert.spv";
 		spec.vertex_bindings = &binding;
@@ -199,9 +192,7 @@ namespace vk {
 		shadow_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
-	// --- barrier (hand-rolled: the whole point is a multi-layer transition,
-	// which vk_targets' RenderImage/transition() doesn't support today — same
-	// exception vk_ibl takes for its own cubemap images) ---
+	// --- barrier ---
 
 	static void barrier(VkCommandBuffer cmd, VkImageLayout from, VkImageLayout to,
 		VkAccessFlags src_access, VkAccessFlags dst_access,
@@ -225,9 +216,6 @@ namespace vk {
 
 	// --- cascade fitting ---
 
-	// same z-range remap as mat4_perspective_vk, applied to an existing
-	// projection so the slice keeps the original matrix's fov/aspect terms
-	// (col[0][0]/col[1][1]) without needing to recover fov_y separately.
 	static mat4 reproject_z_range(const mat4& proj, f32 near_z, f32 far_z) {
 		mat4 m = proj;
 		m.col[2][2] = far_z / (near_z - far_z);
@@ -235,8 +223,6 @@ namespace vk {
 		return m;
 	}
 
-	// full 4-component transform + perspective divide; mat4_transform_point
-	// assumes affine input (w=1), which an inverse projection does not preserve.
 	static vec3 unproject(const mat4& m, f32 x, f32 y, f32 z) {
 		f32 rx = m.col[0][0]*x + m.col[1][0]*y + m.col[2][0]*z + m.col[3][0];
 		f32 ry = m.col[0][1]*x + m.col[1][1]*y + m.col[2][1]*z + m.col[3][1];
@@ -246,7 +232,8 @@ namespace vk {
 		return { rx * inv_w, ry * inv_w, rz * inv_w };
 	}
 
-	static constexpr f32 SPLIT_LAMBDA   = 0.5f;  // blend of log/uniform splits
+	static constexpr f32 SPLIT_LAMBDA    = 0.2f;  // blend of log/uniform splits
+	static constexpr f32 SHADOW_MAX_DIST = 20.0f; // world units; cascades stop here instead of at the camera far plane
 	static constexpr f32 CASCADE_PAD_XY = 5.0f;  // world units; guards edge casters
 	static constexpr f32 CASCADE_PAD_Z  = 20.0f; // world units; guards casters just outside the fitted depth range
 
@@ -255,13 +242,13 @@ namespace vk {
 	{
 		f32 near_z, far_z;
 		mat4_extract_perspective_vk(camera_proj, &near_z, &far_z);
+		
+		if (far_z > SHADOW_MAX_DIST) far_z = SHADOW_MAX_DIST;
 
-		// practical split scheme: blend of logarithmic (tight near cascades)
-		// and uniform (far cascades don't shrink to nothing) splits.
 		f32 splits[CASCADE_COUNT];
 		for (u32 i = 0; i < CASCADE_COUNT; i++) {
 			f32 t = (f32)(i + 1) / (f32)CASCADE_COUNT;
-			f32 log_split     = near_z * powf(far_z / near_z, t);
+			f32 log_split     = near_z * math::pow(far_z / near_z, t);
 			f32 uniform_split = near_z + (far_z - near_z) * t;
 			splits[i] = SPLIT_LAMBDA * log_split + (1.0f - SPLIT_LAMBDA) * uniform_split;
 		}
@@ -292,18 +279,12 @@ namespace vk {
 			vec3 center = { 0.0f, 0.0f, 0.0f };
 			for (u32 k = 0; k < 8; k++) center += corners[k];
 			center = center * (1.0f / 8.0f);
-
-			// bounding-sphere radius of the slice -> distance to place the
-			// synthetic light eye so the whole slice sits in front of it.
 			f32 radius = 0.0f;
 			for (u32 k = 0; k < 8; k++) {
 				f32 d = length(corners[k] - center);
 				if (d > radius) radius = d;
 			}
 
-			// sun_dir points TOWARD the light (see lighting.frag's L = sun_dir);
-			// the shadow camera sits out along that direction and looks back
-			// at the scene, i.e. its eye is center + light_dir * dist, not -.
 			vec3 light_pos = center + light_dir * (radius + CASCADE_PAD_Z);
 			mat4 light_view = mat4_look_at(light_pos, center, up);
 

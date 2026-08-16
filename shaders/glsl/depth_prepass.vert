@@ -18,7 +18,7 @@ layout(set = 0, binding = 0) uniform Globals {
 
 // must match the gbuffer.vert InstanceData layout exactly — both shaders
 // index the same SSBO via gl_InstanceIndex. depth EQUAL test in gbuffer
-// requires bit-identical gl_Position math here.
+// requires bit-identical gl_Position math here, parenthesisation included.
 struct InstanceData {
     mat4 model;
     mat4 normal_matrix;
@@ -35,5 +35,5 @@ layout(set = 0, binding = 1, std430) readonly buffer Instances {
 
 void main() {
     InstanceData id = inst.instances[gl_InstanceIndex];
-    gl_Position = g.proj * g.view * id.model * vec4(in_position, 1.0);
+    gl_Position = g.proj * (g.view * (id.model * vec4(in_position, 1.0)));
 }

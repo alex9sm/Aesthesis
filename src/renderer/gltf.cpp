@@ -35,6 +35,60 @@ namespace renderer {
 		return nullptr;
 	}
 
+	// --- geometry dedup ---
+	//
+	// Exporters routinely emit one copy of a mesh per placement (16 identical
+	// pawns => 16 accessor sets holding identical bytes), which the batcher
+	// cannot instance because it buckets by mesh handle. Hashing the raw
+	// accessor bytes collapses those back to one primitive, so repeated
+	// geometry costs one draw with N instances instead of N draws.
+
+	static u64 fnv1a(const void* bytes, usize len, u64 h) {
+		const u8* p = (const u8*)bytes;
+		for (usize i = 0; i < len; i++) {
+			h ^= p[i];
+			h *= 0x100000001b3ull;
+		}
+		return h;
+	}
+
+	static u64 hash_accessor(const cgltf_accessor* acc, u64 h) {
+		if (!acc) return fnv1a("none", 4, h);
+
+		u64 desc[3] = { (u64)acc->count, (u64)acc->type, (u64)acc->component_type };
+		h = fnv1a(desc, sizeof(desc), h);
+
+		const cgltf_buffer_view* view = acc->buffer_view;
+		// cgltf_buffer_view_data already applies view->offset and honours the
+		// extension-decoded override, so only acc->offset remains to be added.
+		const u8* base = view ? (const u8*)cgltf_buffer_view_data(view) : nullptr;
+		usize span = acc->count
+			? (usize)(acc->count - 1) * acc->stride + cgltf_calc_size(acc->type, acc->component_type)
+			: 0;
+
+		// sparse accessors patch their base bytes after the fact, so the raw
+		// range does not identify them; unreadable ranges are likewise
+		// unidentifiable. fold the address in so these dedup against nothing.
+		if (acc->is_sparse || !base || acc->offset + span > view->size) {
+			u64 key = (u64)(usize)acc;
+			return fnv1a(&key, sizeof(key), h);
+		}
+		return fnv1a(base + acc->offset, span, h);
+	}
+
+	// identity of a primitive's geometry — everything primitive_to_mesh reads.
+	static u64 primitive_geometry_hash(const cgltf_primitive* prim) {
+		const cgltf_attribute* attrs[4] = {
+			find_attribute(prim, cgltf_attribute_type_position),
+			find_attribute(prim, cgltf_attribute_type_normal),
+			find_attribute(prim, cgltf_attribute_type_tangent),
+			find_attribute_indexed(prim, cgltf_attribute_type_texcoord, 0),
+		};
+		u64 h = 0xcbf29ce484222325ull;
+		for (u32 i = 0; i < 4; i++) h = hash_accessor(attrs[i] ? attrs[i]->data : nullptr, h);
+		return hash_accessor(prim->indices, h);
+	}
+
 	// unpack one cgltf_primitive into MeshData. returns false if no positions.
 	static bool primitive_to_mesh(const cgltf_primitive* prim, MeshData* out) {
 		const cgltf_attribute* pos_attr = find_attribute(prim, cgltf_attribute_type_position);
@@ -213,12 +267,14 @@ namespace renderer {
 	// per node-with-mesh. parent_matrix is multiplied into the node's local
 	// transform to produce the world transform.
 	//
-	// `prim_offset_per_mesh[i]` gives the starting index in model->primitives
-	// for cgltf mesh i's primitives.
+	// `prim_offset_per_mesh[i]` gives cgltf mesh i's first slot in the flat
+	// (mesh, primitive) slot space; `prim_remap` maps a slot to the deduped
+	// index in model->primitives.
 	static void walk_node(GltfModel* model, u32* node_capacity,
 		const cgltf_data* data, const cgltf_node* node,
 		const mat4& parent_world,
-		const u32* prim_offset_per_mesh, const u32* mat_index_for_cgltf_mat,
+		const u32* prim_offset_per_mesh, const u32* prim_remap, u32 slot_count,
+		const u32* mat_index_for_cgltf_mat,
 		const cgltf_material** mat_keys, u32 mat_count)
 	{
 		// compute local transform via cgltf
@@ -236,7 +292,9 @@ namespace renderer {
 			cgltf_size mesh_index = node->mesh - data->meshes;
 			u32 prim_base = prim_offset_per_mesh[mesh_index];
 			for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
-				u32 prim_idx = prim_base + (u32)p;
+				u32 slot = prim_base + (u32)p;
+				if (slot >= slot_count) continue;
+				u32 prim_idx = prim_remap[slot];
 				if (prim_idx >= model->primitive_count) continue;
 
 				// look up material index in our flat materials array
@@ -269,7 +327,8 @@ namespace renderer {
 
 		for (cgltf_size i = 0; i < node->children_count; i++) {
 			walk_node(model, node_capacity, data, node->children[i], world,
-				prim_offset_per_mesh, mat_index_for_cgltf_mat, mat_keys, mat_count);
+				prim_offset_per_mesh, prim_remap, slot_count,
+				mat_index_for_cgltf_mat, mat_keys, mat_count);
 		}
 	}
 
@@ -310,20 +369,39 @@ namespace renderer {
 		memory::set(out->primitives, 0, sizeof(GltfPrimitive) * total_prims);
 		out->primitive_count = 0;
 
-		// offset table: prim_offset_per_mesh[meshIndex] = first global primitive index
+		// offset table: prim_offset_per_mesh[meshIndex] = first flat slot index.
+		// prim_remap maps each flat slot to its deduped primitive; slots sharing
+		// byte-identical geometry converge on one entry in out->primitives.
 		u32* prim_offset_per_mesh = (u32*)memory::malloc(sizeof(u32) * data->meshes_count);
+		u32* prim_remap  = (u32*)memory::malloc(sizeof(u32) * total_prims);
+		u64* prim_hashes = (u64*)memory::malloc(sizeof(u64) * total_prims);
 
+		u32 slot_count = 0;
 		for (cgltf_size m = 0; m < data->meshes_count; m++) {
-			prim_offset_per_mesh[m] = out->primitive_count;
+			prim_offset_per_mesh[m] = slot_count;
 			for (cgltf_size p = 0; p < data->meshes[m].primitives_count; p++) {
-				GltfPrimitive& gp = out->primitives[out->primitive_count];
-				if (!primitive_to_mesh(&data->meshes[m].primitives[p], &gp.mesh)) {
-					logger::error("glTF primitive missing POSITION: %s (mesh %u prim %u)",
-						path, (u32)m, (u32)p);
-					gp.mesh = {};
+				const cgltf_primitive* cp = &data->meshes[m].primitives[p];
+
+				// 64-bit content hash; distinct geometry colliding is ~1e-17 here,
+				// and vertex/index counts are folded in, so no byte-compare pass.
+				u64 h = primitive_geometry_hash(cp);
+				u32 unique = (u32)~0u;
+				for (u32 u = 0; u < out->primitive_count; u++) {
+					if (prim_hashes[u] == h) { unique = u; break; }
 				}
-				gp.material_index = (u32)~0u;  // resolved below
-				out->primitive_count++;
+
+				if (unique == (u32)~0u) {
+					GltfPrimitive& gp = out->primitives[out->primitive_count];
+					if (!primitive_to_mesh(cp, &gp.mesh)) {
+						logger::error("glTF primitive missing POSITION: %s (mesh %u prim %u)",
+							path, (u32)m, (u32)p);
+						gp.mesh = {};
+					}
+					gp.material_index = (u32)~0u;  // resolved below
+					prim_hashes[out->primitive_count] = h;
+					unique = out->primitive_count++;
+				}
+				prim_remap[slot_count++] = unique;
 			}
 		}
 
@@ -427,15 +505,16 @@ namespace renderer {
 			}
 		}
 
-		// resolve primitive -> material_index by walking meshes again
+		// resolve primitive -> material_index by walking meshes again. deduped
 		u32 prim_cursor = 0;
 		for (cgltf_size m = 0; m < data->meshes_count; m++) {
 			for (cgltf_size p = 0; p < data->meshes[m].primitives_count; p++) {
 				const cgltf_material* pm = data->meshes[m].primitives[p].material;
-				if (pm) {
+				GltfPrimitive& gp = out->primitives[prim_remap[prim_cursor]];
+				if (pm && gp.material_index == (u32)~0u) {
 					for (u32 mi = 0; mi < out->material_count; mi++) {
 						if (mat_keys[mi] == pm) {
-							out->primitives[prim_cursor].material_index = mi;
+							gp.material_index = mi;
 							break;
 						}
 					}
@@ -460,25 +539,30 @@ namespace renderer {
 		if (scene) {
 			for (cgltf_size i = 0; i < scene->nodes_count; i++) {
 				walk_node(out, &node_capacity, data, scene->nodes[i], ident,
-					prim_offset_per_mesh, mat_index_for_cgltf_mat, mat_keys, out->material_count);
+					prim_offset_per_mesh, prim_remap, slot_count,
+					mat_index_for_cgltf_mat, mat_keys, out->material_count);
 			}
 		} else {
 			// no scene declared: walk all nodes that have no parent.
 			for (cgltf_size i = 0; i < data->nodes_count; i++) {
 				if (data->nodes[i].parent) continue;
 				walk_node(out, &node_capacity, data, &data->nodes[i], ident,
-					prim_offset_per_mesh, mat_index_for_cgltf_mat, mat_keys, out->material_count);
+					prim_offset_per_mesh, prim_remap, slot_count,
+					mat_index_for_cgltf_mat, mat_keys, out->material_count);
 			}
 		}
 
 		// --- cleanup temporaries ---
 		memory::free(prim_offset_per_mesh);
+		memory::free(prim_remap);
+		memory::free(prim_hashes);
 		memory::free(image_keys);
 		if (mat_keys) memory::free((void*)mat_keys);
 		if (mat_index_for_cgltf_mat) memory::free(mat_index_for_cgltf_mat);
 
-		logger::info("Loaded glTF model '%s' (%u prims, %u materials, %u textures, %u nodes)",
-			path, out->primitive_count, out->material_count, out->texture_count, out->node_count);
+		logger::info("Loaded glTF model '%s' (%u/%u prims after dedup, %u materials, %u textures, %u nodes)",
+			path, out->primitive_count, total_prims,
+			out->material_count, out->texture_count, out->node_count);
 
 		cgltf_free(data);
 		return true;

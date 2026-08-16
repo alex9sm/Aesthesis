@@ -224,7 +224,6 @@ namespace vk {
 
 		end_upload();
 
-		logger::info("BRDF LUT loaded from %s (%ux%u)", BRDF_LUT_PNG, BRDF_LUT_SIZE, BRDF_LUT_SIZE);
 		return true;
 	}
 

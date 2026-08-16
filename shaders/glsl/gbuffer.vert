@@ -39,7 +39,7 @@ layout(location = 5) flat out uint v_material_id;
 
 void main() {
     InstanceData id = inst.instances[gl_InstanceIndex];
-    gl_Position = g.proj * g.view * id.model * vec4(in_position, 1.0);
+    gl_Position = g.proj * (g.view * (id.model * vec4(in_position, 1.0)));
 
     v_uv           = in_uv;
     v_normal_ws    = mat3(id.normal_matrix) * in_normal;

@@ -9,6 +9,8 @@
 namespace vk {
 
 	static constexpr u32 MAX_DRAWS_PER_FRAME = 1024;
+	static constexpr u32 INSTANCE_PASSES        = 4;
+	static constexpr u32 MAX_INSTANCES_PER_FRAME = MAX_DRAWS_PER_FRAME * INSTANCE_PASSES;
 
 	// must match std430 layout in gbuffer.vert
 	struct InstanceData {

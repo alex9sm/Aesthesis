@@ -23,7 +23,7 @@ namespace vk {
 	static bool create_buffers() {
 		VmaAllocator a = allocator();
 
-		VkDeviceSize size = (VkDeviceSize)sizeof(InstanceData) * MAX_DRAWS_PER_FRAME;
+		VkDeviceSize size = (VkDeviceSize)sizeof(InstanceData) * MAX_INSTANCES_PER_FRAME;
 
 		for (u32 i = 0; i < FRAMES_IN_FLIGHT; i++) {
 			VkBufferCreateInfo bci = {};
@@ -50,7 +50,7 @@ namespace vk {
 	static void write_descriptors() {
 		Context& c = context();
 
-		VkDeviceSize size = (VkDeviceSize)sizeof(InstanceData) * MAX_DRAWS_PER_FRAME;
+		VkDeviceSize size = (VkDeviceSize)sizeof(InstanceData) * MAX_INSTANCES_PER_FRAME;
 
 		for (u32 i = 0; i < FRAMES_IN_FLIGHT; i++) {
 			VkDescriptorBufferInfo bi = {};
@@ -93,7 +93,17 @@ namespace vk {
 	}
 
 	u32 push_instance(const InstanceData& data) {
-		if (write_cursor >= MAX_DRAWS_PER_FRAME) return UINT32_MAX;
+		if (write_cursor >= MAX_INSTANCES_PER_FRAME) {
+			// Once per process, not per frame — an overflowing frame overflows
+			// every frame, and the log is for fatal/important only.
+			static bool warned = false;
+			if (!warned) {
+				logger::error("Instance buffer full (%u); draws are being dropped",
+					MAX_INSTANCES_PER_FRAME);
+				warned = true;
+			}
+			return UINT32_MAX;
+		}
 		u32 i = current_frame_index();
 		InstanceData* dst = (InstanceData*)frames[i].mapped + write_cursor;
 		memory::copy(dst, &data, sizeof(InstanceData));

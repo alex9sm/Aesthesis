@@ -40,6 +40,7 @@ namespace renderer {
 	static mat4 frame_view = {};
 	static mat4 frame_projection = {};
 	static bool frame_active = false;
+	static mat4 frame_cascade_vp[vk::CASCADE_COUNT] = {};
 
 	static u32 g_debug_mode = DEBUG_FINAL;
 
@@ -350,6 +351,7 @@ namespace renderer {
 			g.misc = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 			vk::compute_cascades(view, projection, g_sun_dir, g.cascade_view_proj, g.cascade_splits);
+			for (u32 i = 0; i < vk::CASCADE_COUNT; i++) frame_cascade_vp[i] = g.cascade_view_proj[i];
 
 			vk::update_globals(g);
 		}
@@ -409,13 +411,8 @@ namespace renderer {
 			while (run_end < sorted_count && scratch[run_end].mesh == run_mesh) {
 				run_end++;
 			}
-
-			// first_instance must be the SSBO slot push_instance actually
-			// returns, not the local run_start index — they only coincide when
-			// this is the sole build_batches call of the frame. Two calls
-			// share one buffer (shadow batches, then camera batches), so the
-			// second call's SSBO slots start wherever the first left off.
 			u32 first_instance = 0;
+			u32 pushed = 0;
 			for (u32 i = run_start; i < run_end; i++) {
 				vk::InstanceData id = {};
 				id.model = scratch[i].model;
@@ -423,10 +420,14 @@ namespace renderer {
 				id.tint = scratch[i].tint;
 				id.material_id = scratch[i].material;
 				u32 idx = vk::push_instance(id);
-				if (i == run_start) first_instance = idx;
+				if (idx == UINT32_MAX) break;   // buffer full; emit the partial run
+				if (pushed == 0) first_instance = idx;
+				pushed++;
 			}
+			// nothing fit, so nothing will fit for the remaining runs either.
+			if (pushed == 0) break;
 
-			out_batches[batch_count++] = { run_mesh, first_instance, run_end - run_start };
+			out_batches[batch_count++] = { run_mesh, first_instance, pushed };
 			run_start = run_end;
 		}
 		return batch_count;
@@ -440,10 +441,23 @@ namespace renderer {
 
 		vk::reset_instances();
 
-		// shadow batches: full, uncensored draw list no culling
-		static PendingDraw shadow_scratch[vk::MAX_DRAWS_PER_FRAME];
-		static vk::DrawBatch shadow_batches[vk::MAX_DRAWS_PER_FRAME];
-		u32 shadow_batch_count = build_batches(draw_queue, draw_count, shadow_scratch, shadow_batches);
+		static PendingDraw   shadow_visible[vk::MAX_DRAWS_PER_FRAME];
+		static PendingDraw   shadow_scratch[vk::MAX_DRAWS_PER_FRAME];
+		static vk::DrawBatch shadow_batches[vk::CASCADE_COUNT][vk::MAX_DRAWS_PER_FRAME];
+		vk::CascadeBatches cascades[vk::CASCADE_COUNT] = {};
+
+		for (u32 c = 0; c < vk::CASCADE_COUNT; c++) {
+			Frustum cf = frustum_from_vp(frame_cascade_vp[c]);
+			u32 visible = 0;
+			for (u32 r = 0; r < draw_count; r++) {
+				if (cull_test(cf, draw_queue[r].mesh, draw_queue[r].model)) {
+					shadow_visible[visible++] = draw_queue[r];
+				}
+			}
+			cascades[c].batches = shadow_batches[c];
+			cascades[c].count = build_batches(shadow_visible, visible,
+				shadow_scratch, shadow_batches[c]);
+		}
 
 		// frustum cull
 		{
@@ -464,7 +478,7 @@ namespace renderer {
 
 		vk::patch_globals_misc({ (f32)vk::light_count(), 0.0f, 0.0f, 0.0f });
 
-		vk::execute_shadow_pass(cmd, shadow_batches, shadow_batch_count);
+		vk::execute_shadow_pass(cmd, cascades);
 		vk::execute_depth_prepass(cmd, batches, batch_count);
 		vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);

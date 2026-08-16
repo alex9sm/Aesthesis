@@ -39,5 +39,7 @@ layout(push_constant) uniform PC {
 
 void main() {
     InstanceData id = inst.instances[gl_InstanceIndex];
-    gl_Position = g.cascade_view_proj[pc.cascade_index] * id.model * vec4(in_position, 1.0);
+    // parenthesised right-to-left: matrix*vector each step. without the parens
+    // GLSL's left associativity forces a full mat4*mat4 per vertex.
+    gl_Position = g.cascade_view_proj[pc.cascade_index] * (id.model * vec4(in_position, 1.0));
 }

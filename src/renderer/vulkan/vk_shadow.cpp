@@ -232,6 +232,9 @@ namespace vk {
 		vec3 up = { 0.0f, 1.0f, 0.0f };
 		if (math::abs(dot(light_dir, up)) > 0.99f) up = { 0.0f, 0.0f, 1.0f };
 
+		mat4 light_basis     = mat4_look_at({ 0.0f, 0.0f, 0.0f }, -light_dir, up);
+		mat4 light_basis_inv = mat4_inverse(light_basis);
+
 		f32 sx_vals[2] = { -1.0f, 1.0f };
 		f32 sy_vals[2] = { -1.0f, 1.0f };
 		f32 sz_vals[2] = { 0.0f, 1.0f };
@@ -259,28 +262,18 @@ namespace vk {
 				if (d > radius) radius = d;
 			}
 
-			vec3 light_pos = center + light_dir * (radius + CASCADE_PAD_Z);
-			mat4 light_view = mat4_look_at(light_pos, center, up);
-
-			vec3 lmin = mat4_transform_point(light_view, corners[0]);
-			vec3 lmax = lmin;
-			for (u32 k = 1; k < 8; k++) {
-				vec3 p = mat4_transform_point(light_view, corners[k]);
-				if (p.x < lmin.x) lmin.x = p.x; if (p.x > lmax.x) lmax.x = p.x;
-				if (p.y < lmin.y) lmin.y = p.y; if (p.y > lmax.y) lmax.y = p.y;
-				if (p.z < lmin.z) lmin.z = p.z; if (p.z > lmax.z) lmax.z = p.z;
-			}
-
-			// light-space z is negative in front of the eye (mat4_look_at's
-			// convention); near/far distances are positive.
-			f32 near_dist = -lmax.z - CASCADE_PAD_Z;
-			f32 far_dist  = -lmin.z + CASCADE_PAD_Z;
-			if (near_dist < 0.01f) near_dist = 0.01f;
-
+			radius = math::ceil(radius * 16.0f) * (1.0f / 16.0f);
+			f32  texel = (2.0f * radius) / (f32)SHADOW_MAP_SIZE;
+			vec3 c_ls  = mat4_transform_point(light_basis, center);
+			c_ls.x = math::floor(c_ls.x / texel) * texel;
+			c_ls.y = math::floor(c_ls.y / texel) * texel;
+			vec3 snapped_center = mat4_transform_point(light_basis_inv, c_ls);
+			vec3 light_pos  = snapped_center + light_dir * (radius + CASCADE_PAD_Z);
+			mat4 light_view = mat4_look_at(light_pos, snapped_center, up);
 			mat4 light_proj = mat4_ortho_vk(
-				lmin.x, lmax.x,
-				lmin.y, lmax.y,
-				near_dist, far_dist);
+				-radius, radius,
+				-radius, radius,
+				0.01f, 2.0f * radius + CASCADE_PAD_Z);
 
 			out_view_proj[i] = light_proj * light_view;
 			split_near = split_far;
@@ -289,10 +282,7 @@ namespace vk {
 
 	// --- execution ---
 
-	void execute_shadow_pass(VkCommandBuffer cmd, const DrawBatch* batches, u32 batch_count) {
-		// not transition_discard: every cascade LOAD_OP_CLEARs today, but cascade
-		// staggering would need skipped layers preserved across frames, and
-		// non-discard is correct under both.
+	void execute_shadow_pass(VkCommandBuffer cmd, const CascadeBatches cascades[CASCADE_COUNT]) {
 		transition(cmd, shadow_img, ResState::DepthWrite);
 
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -301,8 +291,6 @@ namespace vk {
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout,
 			0, 1, &global_set, 0, nullptr);
 
-		// Y-flipped, matching depth_prepass — keeps triangle winding (and thus
-		// back-face culling) consistent with the rest of the renderer.
 		VkViewport viewport = {};
 		viewport.x = 0.0f;
 		viewport.y = (f32)SHADOW_MAP_SIZE;
@@ -337,8 +325,9 @@ namespace vk {
 			CascadePC pc = { cascade };
 			vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CascadePC), &pc);
 
-			for (u32 b = 0; b < batch_count; b++) {
-				const DrawBatch& batch = batches[b];
+			const CascadeBatches& cb = cascades[cascade];
+			for (u32 b = 0; b < cb.count; b++) {
+				const DrawBatch& batch = cb.batches[b];
 				const MeshGPU* m = get_mesh(batch.mesh);
 				if (!m) continue;
 

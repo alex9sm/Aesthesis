@@ -10,7 +10,7 @@
 namespace vk {
 
 	static constexpr u32 CASCADE_COUNT   = 3;
-	static constexpr u32 SHADOW_MAP_SIZE = 4096;
+	static constexpr u32 SHADOW_MAP_SIZE = 2048;
 
 	bool init_shadow();
 	void shutdown_shadow();

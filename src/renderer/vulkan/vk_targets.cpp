@@ -57,6 +57,7 @@ namespace vk {
 
 		out->format = format;
 		out->state = ResState::Undefined;
+		out->layers = 1;
 		return true;
 	}
 
@@ -176,7 +177,7 @@ namespace vk {
 	}
 
 	static void emit_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
-		StateInfo from, StateInfo to)
+		u32 layers, StateInfo from, StateInfo to)
 	{
 		VkImageMemoryBarrier b = {};
 		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -187,26 +188,27 @@ namespace vk {
 		b.image = image;
 		b.subresourceRange.aspectMask = aspect;
 		b.subresourceRange.levelCount = 1;
-		b.subresourceRange.layerCount = 1;
+		b.subresourceRange.layerCount = layers;
 		b.srcAccessMask = from.access;
 		b.dstAccessMask = to.access;
 		vkCmdPipelineBarrier(cmd, from.stage, to.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
 	}
 
 	void transition(VkCommandBuffer cmd, RenderImage& img, ResState new_state) {
-		emit_barrier(cmd, img.image, aspect_for_format(img.format),
+		emit_barrier(cmd, img.image, aspect_for_format(img.format), img.layers,
 			state_info(img.state), state_info(new_state));
 		img.state = new_state;
 	}
 
 	void transition_discard(VkCommandBuffer cmd, RenderImage& img, ResState new_state) {
-		emit_barrier(cmd, img.image, aspect_for_format(img.format),
+		emit_barrier(cmd, img.image, aspect_for_format(img.format), img.layers,
 			state_info(ResState::Undefined), state_info(new_state));
 		img.state = new_state;
 	}
 
 	void transition_raw(VkCommandBuffer cmd, VkImage image, ResState from, ResState to) {
-		emit_barrier(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT,
+		// swapchain images are always single-layer.
+		emit_barrier(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, 1,
 			state_info(from), state_info(to));
 	}
 

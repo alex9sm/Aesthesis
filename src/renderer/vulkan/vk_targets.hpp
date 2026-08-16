@@ -24,7 +24,8 @@ namespace vk {
 		VkImageView   view;
 		VmaAllocation alloc;
 		VkFormat      format;
-		ResState      state; // tracked across passes
+		ResState      state;      // tracked across passes
+		u32           layers = 1; // >1 for array images (e.g. the CSM cascade array)
 	};
 
 	struct Targets {

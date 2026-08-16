@@ -48,6 +48,18 @@ namespace math {
 		return b.f;
 	}
 
+	inline f32 floor(f32 x) {
+		if (abs(x) >= 8388608.0f) return x;
+		f32 t = (f32)(i32)x;
+		return (t > x) ? t - 1.0f : t;
+	}
+
+	inline f32 ceil(f32 x) {
+		if (abs(x) >= 8388608.0f) return x;
+		f32 t = (f32)(i32)x;
+		return (t < x) ? t + 1.0f : t;
+	}
+
 	inline f32 sqrt(f32 x) {
 #if AE_MATH_SSE2
 		return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));

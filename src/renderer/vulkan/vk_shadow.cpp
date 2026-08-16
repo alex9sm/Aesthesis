@@ -6,15 +6,12 @@
 #include "vk_globals.hpp"
 #include "vk_frame.hpp"
 #include "vk_mesh.hpp"
+#include "vk_targets.hpp"
 #include "log.hpp"
 
 namespace vk {
-
-	static VkImage       shadow_image  = VK_NULL_HANDLE;
-	static VmaAllocation shadow_alloc  = VK_NULL_HANDLE;
+	static RenderImage   shadow_img = {};
 	static VkImageView   layer_views[CASCADE_COUNT] = {};
-	static VkImageView   array_view    = VK_NULL_HANDLE;
-	static VkImageLayout shadow_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 	static VkSampler     shadow_sampler = VK_NULL_HANDLE;
 
 	static VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
@@ -46,16 +43,19 @@ namespace vk {
 		VmaAllocationCreateInfo aci = {};
 		aci.usage = VMA_MEMORY_USAGE_AUTO;
 
-		if (vmaCreateImage(a, &ci, &aci, &shadow_image, &shadow_alloc, nullptr) != VK_SUCCESS) {
+		if (vmaCreateImage(a, &ci, &aci, &shadow_img.image, &shadow_img.alloc, nullptr) != VK_SUCCESS) {
 			logger::fatal("Failed to create CSM shadow image");
 			return false;
 		}
+		shadow_img.format = VK_FORMAT_D32_SFLOAT;
+		shadow_img.state  = ResState::Undefined;
+		shadow_img.layers = CASCADE_COUNT;
 
 		// one single-layer view per cascade
 		for (u32 i = 0; i < CASCADE_COUNT; i++) {
 			VkImageViewCreateInfo vci = {};
 			vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-			vci.image = shadow_image;
+			vci.image = shadow_img.image;
 			vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			vci.format = VK_FORMAT_D32_SFLOAT;
 			vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -71,14 +71,14 @@ namespace vk {
 		// full-array view, bound as sampler2DArrayShadow in the global set.
 		VkImageViewCreateInfo avi = {};
 		avi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		avi.image = shadow_image;
+		avi.image = shadow_img.image;
 		avi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
 		avi.format = VK_FORMAT_D32_SFLOAT;
 		avi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 		avi.subresourceRange.levelCount = 1;
 		avi.subresourceRange.baseArrayLayer = 0;
 		avi.subresourceRange.layerCount = CASCADE_COUNT;
-		if (vkCreateImageView(c.device, &avi, nullptr, &array_view) != VK_SUCCESS) {
+		if (vkCreateImageView(c.device, &avi, nullptr, &shadow_img.view) != VK_SUCCESS) {
 			logger::fatal("Failed to create CSM array view");
 			return false;
 		}
@@ -111,7 +111,7 @@ namespace vk {
 
 		VkDescriptorImageInfo info = {};
 		info.sampler = shadow_sampler;
-		info.imageView = array_view;
+		info.imageView = shadow_img.view;
 		info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 		for (u32 fi = 0; fi < FRAMES_IN_FLIGHT; fi++) {
@@ -176,42 +176,17 @@ namespace vk {
 		Context& c = context();
 		if (pipeline)        vkDestroyPipeline(c.device, pipeline, nullptr);
 		if (pipeline_layout) vkDestroyPipelineLayout(c.device, pipeline_layout, nullptr);
-		if (shadow_sampler)  vkDestroySampler(c.device, shadow_sampler, nullptr);
-		if (array_view)      vkDestroyImageView(c.device, array_view, nullptr);
+		if (shadow_sampler)   vkDestroySampler(c.device, shadow_sampler, nullptr);
+		if (shadow_img.view)  vkDestroyImageView(c.device, shadow_img.view, nullptr);
 		for (u32 i = 0; i < CASCADE_COUNT; i++) {
 			if (layer_views[i]) vkDestroyImageView(c.device, layer_views[i], nullptr);
 			layer_views[i] = VK_NULL_HANDLE;
 		}
-		if (shadow_image) vmaDestroyImage(allocator(), shadow_image, shadow_alloc);
+		if (shadow_img.image) vmaDestroyImage(allocator(), shadow_img.image, shadow_img.alloc);
 		pipeline = VK_NULL_HANDLE;
 		pipeline_layout = VK_NULL_HANDLE;
 		shadow_sampler = VK_NULL_HANDLE;
-		array_view = VK_NULL_HANDLE;
-		shadow_image = VK_NULL_HANDLE;
-		shadow_alloc = VK_NULL_HANDLE;
-		shadow_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-	}
-
-	// --- barrier ---
-
-	static void barrier(VkCommandBuffer cmd, VkImageLayout from, VkImageLayout to,
-		VkAccessFlags src_access, VkAccessFlags dst_access,
-		VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage)
-	{
-		VkImageMemoryBarrier b = {};
-		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.image = shadow_image;
-		b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-		b.subresourceRange.levelCount = 1;
-		b.subresourceRange.baseArrayLayer = 0;
-		b.subresourceRange.layerCount = CASCADE_COUNT;
-		b.oldLayout = from;
-		b.newLayout = to;
-		b.srcAccessMask = src_access;
-		b.dstAccessMask = dst_access;
-		vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
+		shadow_img = {};
 	}
 
 	// --- cascade fitting ---
@@ -232,9 +207,8 @@ namespace vk {
 		return { rx * inv_w, ry * inv_w, rz * inv_w };
 	}
 
-	static constexpr f32 SPLIT_LAMBDA    = 0.2f;  // blend of log/uniform splits
-	static constexpr f32 SHADOW_MAX_DIST = 20.0f; // world units; cascades stop here instead of at the camera far plane
-	static constexpr f32 CASCADE_PAD_XY = 5.0f;  // world units; guards edge casters
+	static constexpr f32 SPLIT_LAMBDA    = 0.3f;  // blend of log/uniform splits
+	static constexpr f32 SHADOW_MAX_DIST = 40.0f; // world units; cascades stop here instead of at the camera far plane
 	static constexpr f32 CASCADE_PAD_Z  = 20.0f; // world units; guards casters just outside the fitted depth range
 
 	void compute_cascades(const mat4& camera_view, const mat4& camera_proj,
@@ -304,8 +278,8 @@ namespace vk {
 			if (near_dist < 0.01f) near_dist = 0.01f;
 
 			mat4 light_proj = mat4_ortho_vk(
-				lmin.x - CASCADE_PAD_XY, lmax.x + CASCADE_PAD_XY,
-				lmin.y - CASCADE_PAD_XY, lmax.y + CASCADE_PAD_XY,
+				lmin.x, lmax.x,
+				lmin.y, lmax.y,
 				near_dist, far_dist);
 
 			out_view_proj[i] = light_proj * light_view;
@@ -316,13 +290,10 @@ namespace vk {
 	// --- execution ---
 
 	void execute_shadow_pass(VkCommandBuffer cmd, const DrawBatch* batches, u32 batch_count) {
-		bool first_use = (shadow_layout == VK_IMAGE_LAYOUT_UNDEFINED);
-		barrier(cmd, shadow_layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			first_use ? 0 : VK_ACCESS_SHADER_READ_BIT,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			first_use ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT);
-		shadow_layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		// not transition_discard: every cascade LOAD_OP_CLEARs today, but cascade
+		// staggering would need skipped layers preserved across frames, and
+		// non-discard is correct under both.
+		transition(cmd, shadow_img, ResState::DepthWrite);
 
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
@@ -381,10 +352,7 @@ namespace vk {
 		}
 
 		// hand off to the lighting pass, which samples this same frame.
-		barrier(cmd, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		shadow_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		transition(cmd, shadow_img, ResState::ShaderRead);
 	}
 
 }

@@ -1,11 +1,12 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
+#include "include/shared.glsl"
 
 layout(location = 0) in  vec2 v_uv;
 layout(location = 1) in  vec4 v_color;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 3) uniform sampler2D textures[256];
+layout(set = 0, binding = BIND_TEXTURES) uniform sampler2D textures[SHARED_MAX_TEXTURES];
 
 layout(push_constant) uniform Push {
 	uint atlas_idx;

@@ -1,34 +1,10 @@
 #version 450
+#include "include/globals.glsl"
 
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
 layout(location = 2) in vec4 in_tangent;   // .xyz tangent, .w bitangent sign
 layout(location = 3) in vec2 in_uv;
-
-layout(set = 0, binding = 0) uniform Globals {
-    mat4 view;
-    mat4 proj;
-    mat4 inv_view;
-    mat4 inv_proj;
-    vec4 cam_pos;
-    vec4 sun_dir;
-    vec4 sun_color;
-    vec4 viewport_size;
-} g;
-
-struct InstanceData {
-    mat4 model;
-    mat4 normal_matrix;
-    vec4 tint;
-    uint material_id;
-    uint _pad0;
-    uint _pad1;
-    uint _pad2;
-};
-
-layout(set = 0, binding = 1, std430) readonly buffer Instances {
-    InstanceData instances[];
-} inst;
 
 layout(location = 0) out vec2  v_uv;
 layout(location = 1) out vec3  v_normal_ws;

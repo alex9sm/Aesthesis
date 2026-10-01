@@ -1,5 +1,6 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
+#include "include/shared.glsl"
 
 #include "include/octahedral.glsl"
 
@@ -23,11 +24,11 @@ struct Material {
     uint _pad;
 };
 
-layout(set = 0, binding = 2, std430) readonly buffer Materials {
+layout(set = 0, binding = BIND_MATERIALS, std430) readonly buffer Materials {
     Material materials[];
 } mat;
 
-layout(set = 0, binding = 3) uniform sampler2D u_textures[256];
+layout(set = 0, binding = BIND_TEXTURES) uniform sampler2D u_textures[SHARED_MAX_TEXTURES];
 
 void main() {
     Material m = mat.materials[v_material_id];

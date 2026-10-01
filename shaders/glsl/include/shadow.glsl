@@ -5,8 +5,6 @@
 // the shadow map is a CASCADE_COUNT-layer D32_SFLOAT array sampled through a
 // comparison sampler, so texture() returns the PCF-filtered visibility in [0,1].
 
-const int SHADOW_CASCADE_COUNT = 3;
-
 int select_cascade(float view_depth, vec4 splits) {
     return (view_depth < splits.x) ? 0
          : (view_depth < splits.y) ? 1

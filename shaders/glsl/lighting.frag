@@ -1,42 +1,21 @@
 #version 450
+#include "include/globals.glsl"
 
 #include "include/octahedral.glsl"
 #include "include/ibl.glsl"
 #include "include/shadow.glsl"
+#include "include/lights.glsl"
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform Globals {
-    mat4 view;
-    mat4 proj;
-    mat4 inv_view;
-    mat4 inv_proj;
-    vec4 cam_pos;
-    vec4 sun_dir;
-    vec4 sun_color;
-    vec4 viewport_size;
-    vec4 misc;           // x = point_light_count
-    mat4 cascade_view_proj[3];
-    vec4 cascade_splits;  // x/y/z = view-space far distance of cascades 0/1/2
-} g;
-
-struct PointLight {
-    vec4 position_radius;   // xyz = world pos, w = radius
-    vec4 color_intensity;   // rgb = color, w = intensity
-};
-
-// set 0 bindings 4/5/6 = IBL: diffuse irradiance, prefiltered specular, BRDF LUT.
-layout(set = 0, binding = 4) uniform samplerCube t_irradiance;
-layout(set = 0, binding = 5) uniform samplerCube t_prefilter;
-layout(set = 0, binding = 6) uniform sampler2D   t_brdf_lut;
-
-layout(set = 0, binding = 7, std430) readonly buffer Lights {
-    PointLight lights[];
-} light_buf;
+// IBL: diffuse irradiance, prefiltered specular, BRDF LUT.
+layout(set = 0, binding = BIND_IRRADIANCE) uniform samplerCube t_irradiance;
+layout(set = 0, binding = BIND_PREFILTER) uniform samplerCube t_prefilter;
+layout(set = 0, binding = BIND_BRDF_LUT) uniform sampler2D   t_brdf_lut;
 
 // comparison sampler; texture() returns the PCF-filtered compare result in [0,1].
-layout(set = 0, binding = 8) uniform sampler2DArrayShadow t_shadow;
+layout(set = 0, binding = BIND_SHADOW) uniform sampler2DArrayShadow t_shadow;
 
 layout(set = 1, binding = 0) uniform sampler2D t_albedo;
 layout(set = 1, binding = 1) uniform sampler2D t_normal;
@@ -119,39 +98,44 @@ void main() {
     vec3 radiance = g.sun_color.rgb * g.sun_color.w;
     vec3 direct   = (diffuse + spec) * radiance * NdotL * shadow;
 
-    // --- point lights ---
+    // --- point + spot lights ---
+    vec3  R_spec = reflect(-V, N);
+    float alpha  = roughness * roughness;
     uint num_lights = uint(g.misc.x);
     for (uint i = 0; i < num_lights; i++) {
-        vec3  lpos   = light_buf.lights[i].position_radius.xyz;
-        float radius = light_buf.lights[i].position_radius.w;
-        vec3  lcol   = light_buf.lights[i].color_intensity.rgb;
-        float lint    = light_buf.lights[i].color_intensity.w;
-
-        vec3  Lp     = lpos - P;
+        Light l      = light_buf.lights[i];
+        vec3  Lp     = l.position_range.xyz - P;
         float dist2  = dot(Lp, Lp);
+        float att    = light_attenuation(l, Lp, dist2);
+        if (att <= 0.0) continue;
+
         float dist   = sqrt(dist2);
         vec3  Ll     = Lp / max(dist, 1e-4);
-
-        // UE4-style smooth inverse-square attenuation with radius cutoff
-        float r2     = radius * radius;
-        float win    = clamp(1.0 - (dist2 / r2), 0.0, 1.0);
-        float att    = (win * win) / max(dist2, 1e-4);
-
-        vec3  Hl     = normalize(V + Ll);
         float pNdotL = max(dot(N, Ll), 0.0);
-        float pNdotH = max(dot(N, Hl), 0.0);
-        float pVdotH = max(dot(V, Hl), 0.0);
 
-        vec3  pF   = fresnel_schlick(pVdotH, F0);
-        float pNDF = ndf_ggx(pNdotH, roughness);
-        float pG   = geo_smith(NdotV, pNdotL, roughness);
+        // sphere light (Karis 2013): specular uses the point on the emitter sphere
+        // closest to the reflection ray, renormalized for the widened lobe.
+        // source radius 0 reduces exactly to a point light.
+        float src    = l.color_source.w;
+        vec3  to_ray = dot(Lp, R_spec) * R_spec - Lp;
+        vec3  Ls     = normalize(Lp + to_ray * clamp(src / max(length(to_ray), 1e-4), 0.0, 1.0));
+        float energy = alpha / clamp(alpha + 0.5 * clamp(src / max(dist, 1e-4), 0.0, 1.0), 0.0, 1.0);
+        energy      *= energy;
 
-        vec3 pSpec = (pNDF * pG * pF) / max(4.0 * pNdotL * NdotV, 1e-4);
+        vec3  Hs     = normalize(V + Ls);
+        float sNdotL = max(dot(N, Ls), 0.0);
+        float sNdotH = max(dot(N, Hs), 0.0);
+        float sVdotH = max(dot(V, Hs), 0.0);
+
+        vec3  pF   = fresnel_schlick(sVdotH, F0);
+        float pNDF = ndf_ggx(sNdotH, roughness);
+        float pG   = geo_smith(NdotV, sNdotL, roughness);
+
+        vec3 pSpec = (pNDF * pG * pF) / max(4.0 * sNdotL * NdotV, 1e-4) * energy;
         vec3 pkD   = (vec3(1.0) - pF) * (1.0 - metallic);
         vec3 pDiff = pkD * albedo / PI;
 
-        vec3 pRad  = lcol * lint * att;
-        direct    += (pDiff + pSpec) * pRad * pNdotL;
+        direct += (pDiff * pNdotL + pSpec * sNdotL) * l.color_source.rgb * att;
     }
 
     // --- IBL ambient (Phase F3 diffuse + Phase F4 specular, split-sum) ---
@@ -164,9 +148,9 @@ void main() {
     vec3 diffuse_ibl = kD_ibl * irradiance * albedo;
 
     // Prefiltered radiance along the reflection direction; mip selects
-    // roughness. MAX_LOD = PREFILTER_MIP_COUNT - 1 (5 mips → 4).
+    // roughness. MAX_LOD = PREFILTER_MIP_COUNT - 1.
     vec3  R           = reflect(-V, N);
-    const float MAX_LOD = 4.0;
+    const float MAX_LOD = float(SHARED_PREFILTER_MIP_COUNT - 1);
     vec3  prefiltered = textureLod(t_prefilter, R, roughness * MAX_LOD).rgb;
     vec2  envBRDF     = texture(t_brdf_lut, vec2(NdotV, roughness)).rg;
     vec3  specular_ibl = prefiltered * (F0 * envBRDF.x + envBRDF.y);

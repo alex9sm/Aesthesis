@@ -1,38 +1,13 @@
 #version 450
+#include "include/globals.glsl"
 
 // position-only prepass. the pipeline binds only the position stream (a tight
 // 12 B/vertex buffer, binding 0); the normal/tangent/uv attribute stream is
 // never bound here, so no wasted vertex fetch.
 layout(location = 0) in vec3 in_position;
 
-layout(set = 0, binding = 0) uniform Globals {
-    mat4 view;
-    mat4 proj;
-    mat4 inv_view;
-    mat4 inv_proj;
-    vec4 cam_pos;
-    vec4 sun_dir;
-    vec4 sun_color;
-    vec4 viewport_size;
-} g;
-
-// must match the gbuffer.vert InstanceData layout exactly — both shaders
-// index the same SSBO via gl_InstanceIndex. depth EQUAL test in gbuffer
-// requires bit-identical gl_Position math here, parenthesisation included.
-struct InstanceData {
-    mat4 model;
-    mat4 normal_matrix;
-    vec4 tint;
-    uint material_id;
-    uint _pad0;
-    uint _pad1;
-    uint _pad2;
-};
-
-layout(set = 0, binding = 1, std430) readonly buffer Instances {
-    InstanceData instances[];
-} inst;
-
+// gbuffer's depth EQUAL test requires bit-identical gl_Position math to
+// gbuffer.vert, parenthesisation included.
 void main() {
     InstanceData id = inst.instances[gl_InstanceIndex];
     gl_Position = g.proj * (g.view * (id.model * vec4(in_position, 1.0)));

@@ -28,8 +28,8 @@ namespace vk {
 	// resources stored on the slot, and nulls them. Idempotent.
 	void release_bake_resources(CubemapSlot* slot);
 
-	// Selects which cubemap drives IBL diffuse (binding 4) + specular
-	// (binding 5). Pure descriptor write across all frames-in-flight.
+	// Selects which cubemap drives IBL diffuse (BIND_IRRADIANCE) + specular
+	// (BIND_PREFILTER). Pure descriptor write across all frames-in-flight.
 	// INVALID_CUBEMAP reverts to neutral placeholders. Must be called outside
 	// begin_frame / end_frame.
 	void          set_environment_cubemap(CubemapHandle handle);

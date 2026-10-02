@@ -16,6 +16,7 @@ layout(set = 0, binding = BIND_BRDF_LUT) uniform sampler2D   t_brdf_lut;
 
 // comparison sampler; texture() returns the PCF-filtered compare result in [0,1].
 layout(set = 0, binding = BIND_SHADOW) uniform sampler2DArrayShadow t_shadow;
+layout(set = 0, binding = BIND_SPOT_SHADOW) uniform sampler2DShadow t_spot_shadow;
 
 layout(set = 1, binding = 0) uniform sampler2D t_albedo;
 layout(set = 1, binding = 1) uniform sampler2D t_normal;
@@ -110,6 +111,11 @@ void main() {
         if (att <= 0.0) continue;
 
         float dist   = sqrt(dist2);
+        if (l.params.y >= 0.0) {
+            int slot = int(l.params.y);
+            att *= sample_spot_shadow(t_spot_shadow, g.spot_shadow_vp[slot], slot, P, N, dist, l.params.z);
+            if (att <= 0.0) continue;
+        }
         vec3  Ll     = Lp / max(dist, 1e-4);
         float pNdotL = max(dot(N, Ll), 0.0);
 

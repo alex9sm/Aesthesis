@@ -9,6 +9,14 @@
 
 namespace vk {
 
+	struct DebugPC {
+		u32 mode;
+		f32 exposure;
+	};
+
+	// scene_hdr, albedo, normal, material, depth
+	static constexpr u32 VIEW_COUNT = 5;
+
 	static VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
 	static VkDescriptorPool      pool       = VK_NULL_HANDLE;
 	static VkDescriptorSet       set        = VK_NULL_HANDLE;
@@ -40,8 +48,8 @@ namespace vk {
 	static bool create_descriptor_resources() {
 		Context& c = context();
 
-		VkDescriptorSetLayoutBinding bindings[5] = {};
-		for (u32 i = 0; i < 5; i++) {
+		VkDescriptorSetLayoutBinding bindings[VIEW_COUNT] = {};
+		for (u32 i = 0; i < VIEW_COUNT; i++) {
 			bindings[i].binding = i;
 			bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			bindings[i].descriptorCount = 1;
@@ -50,7 +58,7 @@ namespace vk {
 
 		VkDescriptorSetLayoutCreateInfo lci = {};
 		lci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		lci.bindingCount = 5;
+		lci.bindingCount = VIEW_COUNT;
 		lci.pBindings = bindings;
 
 		if (vkCreateDescriptorSetLayout(c.device, &lci, nullptr, &set_layout) != VK_SUCCESS) {
@@ -60,7 +68,7 @@ namespace vk {
 
 		VkDescriptorPoolSize size = {};
 		size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		size.descriptorCount = 5;
+		size.descriptorCount = VIEW_COUNT;
 
 		VkDescriptorPoolCreateInfo pci = {};
 		pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -95,7 +103,7 @@ namespace vk {
 		VkPushConstantRange push_range = {};
 		push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		push_range.offset = 0;
-		push_range.size = sizeof(u32);
+		push_range.size = sizeof(DebugPC);
 
 		// fullscreen composite/debug-view blit into the swapchain image.
 		GraphicsPipelineSpec spec = {};
@@ -137,16 +145,16 @@ namespace vk {
 		Context& c = context();
 		Targets& t = targets();
 
-		VkDescriptorImageInfo infos[5] = {};
-		VkImageView views[5] = { t.scene_hdr.view, t.albedo.view, t.normal.view, t.material.view, t.depth.view };
-		for (u32 i = 0; i < 5; i++) {
+		VkDescriptorImageInfo infos[VIEW_COUNT] = {};
+		VkImageView views[VIEW_COUNT] = { t.scene_hdr.view, t.albedo.view, t.normal.view, t.material.view, t.depth.view };
+		for (u32 i = 0; i < VIEW_COUNT; i++) {
 			infos[i].sampler = sampler;
 			infos[i].imageView = views[i];
 			infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		}
 
-		VkWriteDescriptorSet writes[5] = {};
-		for (u32 i = 0; i < 5; i++) {
+		VkWriteDescriptorSet writes[VIEW_COUNT] = {};
+		for (u32 i = 0; i < VIEW_COUNT; i++) {
 			writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			writes[i].dstSet = set;
 			writes[i].dstBinding = i;
@@ -154,10 +162,10 @@ namespace vk {
 			writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			writes[i].pImageInfo = &infos[i];
 		}
-		vkUpdateDescriptorSets(c.device, 5, writes, 0, nullptr);
+		vkUpdateDescriptorSets(c.device, VIEW_COUNT, writes, 0, nullptr);
 	}
 
-	void execute_debug_pass(VkCommandBuffer cmd, u32 swapchain_image_index, u32 mode) {
+	void execute_debug_pass(VkCommandBuffer cmd, u32 swapchain_image_index, u32 mode, f32 exposure) {
 		Swapchain& sc = swapchain();
 		VkImage dst = sc.images[swapchain_image_index];
 		VkImageView dst_view = sc.image_views[swapchain_image_index];
@@ -203,7 +211,8 @@ namespace vk {
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout,
 			0, 2, sets, 0, nullptr);
 
-		vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(u32), &mode);
+		DebugPC pc = { mode, exposure };
+		vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
 
 		vkCmdDraw(cmd, 3, 1, 0, 0);
 

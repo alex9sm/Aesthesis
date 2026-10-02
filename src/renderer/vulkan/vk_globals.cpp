@@ -1,9 +1,10 @@
 #include "vk_pch.hpp"
+#include "shared.glsl"
 #include "vk_globals.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
 #include "vk_frame.hpp"
-#include "vk_texture.hpp"  // for MAX_TEXTURES (binding 3 array size)
+#include "vk_texture.hpp"  // for MAX_TEXTURES (bindless array size)
 #include "log.hpp"
 #include "memory.hpp"
 
@@ -27,76 +28,54 @@ namespace vk {
 	static bool create_layout() {
 		Context& c = context();
 
-		// binding 0: Globals UBO
-		// binding 1: Instance SSBO
-		// binding 2: Material SSBO
-		// binding 3: bindless textures[MAX_TEXTURES]
-		// binding 4: IBL irradiance cubemap
-		// binding 5: IBL prefiltered specular cubemap
-		// binding 6: BRDF LUT (2D)
-		// binding 7: Point lights SSBO
-		// binding 8: CSM
-		VkDescriptorSetLayoutBinding bindings[9] = {};
-		bindings[0].binding = 0;
-		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		bindings[0].descriptorCount = 1;
-		bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		VkDescriptorSetLayoutBinding bindings[BIND_COUNT] = {};
+		bindings[BIND_GLOBALS].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		bindings[BIND_GLOBALS].descriptorCount = 1;
+		bindings[BIND_GLOBALS].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		bindings[1].binding = 1;
-		bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		bindings[1].descriptorCount = 1;
-		bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		bindings[BIND_INSTANCES].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		bindings[BIND_INSTANCES].descriptorCount = 1;
+		bindings[BIND_INSTANCES].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		bindings[2].binding = 2;
-		bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		bindings[2].descriptorCount = 1;
-		bindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		bindings[BIND_MATERIALS].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		bindings[BIND_MATERIALS].descriptorCount = 1;
+		bindings[BIND_MATERIALS].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		bindings[3].binding = 3;
-		bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		bindings[3].descriptorCount = MAX_TEXTURES;
-		bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		bindings[BIND_TEXTURES].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		bindings[BIND_TEXTURES].descriptorCount = MAX_TEXTURES;
+		bindings[BIND_TEXTURES].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		for (u32 b = 4; b <= 6; b++) {
-			bindings[b].binding = b;
+		for (u32 b = BIND_IRRADIANCE; b <= BIND_BRDF_LUT; b++) {
 			bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			bindings[b].descriptorCount = 1;
 			bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		}
 
-		bindings[7].binding = 7;
-		bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		bindings[7].descriptorCount = 1;
-		bindings[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		bindings[BIND_LIGHTS].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		bindings[BIND_LIGHTS].descriptorCount = 1;
+		bindings[BIND_LIGHTS].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		bindings[8].binding = 8;
-		bindings[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		bindings[8].descriptorCount = 1;
-		bindings[8].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		for (u32 b = BIND_SHADOW; b <= BIND_SPOT_SHADOW; b++) {
+			bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			bindings[b].descriptorCount = 1;
+			bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		}
 
-		// only binding 3 (the texture array) is partially bound; the others
-		// are always populated.
-		VkDescriptorBindingFlags binding_flags[9] = {
-			0,
-			0,
-			0,
-			VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,
-			0,
-			0,
-			0,
-			0,
-			0,
-		};
+		for (u32 b = 0; b < BIND_COUNT; b++) bindings[b].binding = b;
+
+		// only the bindless texture array is partially bound
+		VkDescriptorBindingFlags binding_flags[BIND_COUNT] = {};
+		binding_flags[BIND_TEXTURES] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
 
 		VkDescriptorSetLayoutBindingFlagsCreateInfo flags_ci = {};
 		flags_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-		flags_ci.bindingCount = 9;
+		flags_ci.bindingCount = BIND_COUNT;
 		flags_ci.pBindingFlags = binding_flags;
 
 		VkDescriptorSetLayoutCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 		ci.pNext = &flags_ci;
-		ci.bindingCount = 9;
+		ci.bindingCount = BIND_COUNT;
 		ci.pBindings = bindings;
 
 		if (vkCreateDescriptorSetLayout(c.device, &ci, nullptr, &set_layout) != VK_SUCCESS) {
@@ -115,9 +94,9 @@ namespace vk {
 		// bindings 1 (instance SSBO), 2 (material SSBO) and 7 (lights SSBO).
 		sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		sizes[1].descriptorCount = 3 * FRAMES_IN_FLIGHT;
-		// binding 3 (bindless textures) + bindings 4,5,6 (irradiance, prefilter, brdf LUT) + binding 8 (CSM)
+		// BIND_TEXTURES + BIND_IRRADIANCE/PREFILTER/BRDF_LUT + BIND_SHADOW/SPOT_SHADOW
 		sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[2].descriptorCount = (MAX_TEXTURES + 4) * FRAMES_IN_FLIGHT;
+		sizes[2].descriptorCount = (MAX_TEXTURES + 5) * FRAMES_IN_FLIGHT;
 
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -179,7 +158,7 @@ namespace vk {
 			VkWriteDescriptorSet w = {};
 			w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			w.dstSet = sets[i];
-			w.dstBinding = 0;
+			w.dstBinding = BIND_GLOBALS;
 			w.descriptorCount = 1;
 			w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 			w.pBufferInfo = &bi;
@@ -221,6 +200,11 @@ namespace vk {
 		u32 i = current_frame_index();
 		GlobalUBO* ubo = (GlobalUBO*)ubos[i].mapped;
 		ubo->misc = misc;
+	}
+
+	void patch_globals_spot_shadows(const mat4* view_proj, u32 count) {
+		GlobalUBO* ubo = (GlobalUBO*)ubos[current_frame_index()].mapped;
+		memory::copy(ubo->spot_shadow_vp, view_proj, sizeof(mat4) * count);
 	}
 
 }

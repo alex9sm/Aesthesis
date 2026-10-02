@@ -37,8 +37,7 @@ namespace renderer {
 		DEBUG_MATERIAL = 3,
 		DEBUG_DEPTH    = 4,
 		DEBUG_CASCADES = 5,
-		DEBUG_SHADOW   = 6,
-		DEBUG_COUNT    = 7
+		DEBUG_COUNT    = 6
 	};
 
 	// developer-facing material description. unset texture handles default to
@@ -80,8 +79,13 @@ namespace renderer {
 
 	void set_sun(vec3 direction, vec3 color, f32 intensity);
 
-	// per frame light submit
-	void submit_light(vec3 position, vec3 color, f32 radius, f32 intensity);
+	// per-frame lights. range = falloff cutoff; source_radius = physical size of the
+	// emitter (softens specular highlights). spot cone angles are half-angles in degrees.
+	// shadow-casting spots take an atlas slot (8 per frame, first come) and clamp outer to 80.
+	void submit_point_light(vec3 position, vec3 color, f32 range, f32 intensity,
+		f32 source_radius = 0.05f);
+	void submit_spot_light(vec3 position, vec3 color, f32 range, f32 intensity,
+		f32 source_radius, vec3 direction, f32 inner_deg, f32 outer_deg, bool casts_shadow = false);
 
 	// frame
 	void begin_frame(const mat4& view, const mat4& projection);
@@ -98,6 +102,9 @@ namespace renderer {
 	// 2D overlay (drawn after the 3D scene, no depth)
 	void draw_2d_rect(f32 x, f32 y, f32 w, f32 h, vec4 color);
 	void draw_text(FontHandle font, const char* str, f32 x, f32 y, f32 scale, vec4 color);
+
+	// linear multiplier on scene HDR before the AgX tonemap. default 1.0
+	void set_exposure(f32 exposure);
 
 	// debug
 	void cycle_debug_mode();

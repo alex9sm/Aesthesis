@@ -5,11 +5,13 @@
 
 #include "types.hpp"
 #include "math.hpp"
+#include "shared.glsl"
 
 namespace vk {
 
 	static constexpr u32 MAX_DRAWS_PER_FRAME = 1024;
-	static constexpr u32 INSTANCE_PASSES        = 4;
+	// camera + one per cascade + one per spot shadow slot; each batches its own instances
+	static constexpr u32 INSTANCE_PASSES        = 1 + SHARED_CASCADE_COUNT + SHARED_SPOT_SHADOW_SLOTS;
 	static constexpr u32 MAX_INSTANCES_PER_FRAME = MAX_DRAWS_PER_FRAME * INSTANCE_PASSES;
 
 	// must match std430 layout in gbuffer.vert

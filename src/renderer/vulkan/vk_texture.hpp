@@ -5,12 +5,13 @@
 #include "vk_mem_alloc.h"
 
 #include "types.hpp"
+#include "shared.glsl"
 
 namespace vk {
 
 	using TextureHandle = u32;
 	static constexpr TextureHandle INVALID_TEXTURE = (TextureHandle)~0u;
-	static constexpr u32 MAX_TEXTURES = 256;
+	static constexpr u32 MAX_TEXTURES = SHARED_MAX_TEXTURES;
 
 	// reserved slots, populated at init time
 	static constexpr TextureHandle TEX_DEFAULT_ALBEDO = 0;  // 1x1 white

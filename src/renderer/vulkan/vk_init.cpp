@@ -276,4 +276,8 @@ namespace vk {
 		logger::info("Vulkan shutdown");
 	}
 
+	void wait_idle() {
+		if (ctx.device) vkDeviceWaitIdle(ctx.device);
+	}
+
 }

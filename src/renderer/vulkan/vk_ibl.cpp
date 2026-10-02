@@ -1,4 +1,5 @@
 #include "vk_pch.hpp"
+#include "shared.glsl"
 
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
@@ -23,7 +24,7 @@ namespace vk {
 	static constexpr u32 BRDF_LUT_SIZE       = 256;
 	static constexpr u32 IRRADIANCE_SIZE     = 32;
 	static constexpr u32 PREFILTER_SIZE      = 128;
-	static constexpr u32 PREFILTER_MIP_COUNT = 5;
+	static constexpr u32 PREFILTER_MIP_COUNT = SHARED_PREFILTER_MIP_COUNT;
 	static constexpr const char* BRDF_LUT_PNG = "assets/textures/global/brdf_lut.png";
 
 	struct PrefilterPC {
@@ -461,21 +462,21 @@ namespace vk {
 
 			writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			writes[0].dstSet = dst;
-			writes[0].dstBinding = 4;
+			writes[0].dstBinding = BIND_IRRADIANCE;
 			writes[0].descriptorCount = 1;
 			writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			writes[0].pImageInfo = &irr_i;
 
 			writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			writes[1].dstSet = dst;
-			writes[1].dstBinding = 5;
+			writes[1].dstBinding = BIND_PREFILTER;
 			writes[1].descriptorCount = 1;
 			writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			writes[1].pImageInfo = &pref_i;
 
 			writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			writes[2].dstSet = dst;
-			writes[2].dstBinding = 6;
+			writes[2].dstBinding = BIND_BRDF_LUT;
 			writes[2].descriptorCount = 1;
 			writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			writes[2].pImageInfo = &lut_i;

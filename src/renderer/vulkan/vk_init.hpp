@@ -24,4 +24,7 @@ namespace vk {
 
 	Context& context();
 
+	// full GPU stall; used before destroying resources in-flight frames may still read
+	void wait_idle();
+
 }

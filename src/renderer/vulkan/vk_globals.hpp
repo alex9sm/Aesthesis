@@ -5,6 +5,7 @@
 
 #include "types.hpp"
 #include "math.hpp"
+#include "shared.glsl"
 
 namespace vk {
 
@@ -18,14 +19,16 @@ namespace vk {
 		vec4 sun_color;
 		vec4 viewport_size;
 		vec4 misc;
-		mat4 cascade_view_proj[3];
+		mat4 cascade_view_proj[SHARED_CASCADE_COUNT];
 		vec4 cascade_splits; // x/y/z = view-space far distance of cascades 0/1/2
+		mat4 spot_shadow_vp[SHARED_SPOT_SHADOW_SLOTS];
 	};
 
 	bool init_globals();
 	void shutdown_globals();
 	void update_globals(const GlobalUBO& data);
 	void patch_globals_misc(const vec4& misc);
+	void patch_globals_spot_shadows(const mat4* view_proj, u32 count);
 
 	VkDescriptorSetLayout global_set_layout();
 	VkDescriptorSet       current_global_set();

@@ -1,4 +1,5 @@
 #include "vk_pch.hpp"
+#include "shared.glsl"
 
 // stb_image uses fopen/sscanf etc. which MSVC flags as deprecated.
 #ifndef _CRT_SECURE_NO_WARNINGS
@@ -74,7 +75,7 @@ namespace vk {
 		return true;
 	}
 
-	// writes textures[slot] into binding 3 array element `slot` for every frame's global set.
+	// writes textures[slot] into BIND_TEXTURES array element `slot` for every frame's global set.
 	static void write_descriptor(TextureHandle slot) {
 		Context& c = context();
 		VkDescriptorImageInfo ii = {};
@@ -86,7 +87,7 @@ namespace vk {
 			VkWriteDescriptorSet w = {};
 			w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			w.dstSet = global_set_for_frame(fi);
-			w.dstBinding = 3;
+			w.dstBinding = BIND_TEXTURES;
 			w.dstArrayElement = slot;
 			w.descriptorCount = 1;
 			w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

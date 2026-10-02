@@ -8,8 +8,6 @@
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = BIND_SHADOW) uniform sampler2DArrayShadow t_shadow;
-
 layout(set = 1, binding = 0) uniform sampler2D t_scene;
 layout(set = 1, binding = 1) uniform sampler2D t_albedo;
 layout(set = 1, binding = 2) uniform sampler2D t_normal;
@@ -28,7 +26,7 @@ vec3 view_pos_at(vec2 uv, float d) {
 const vec3 SKY = vec3(0.05, 0.07, 0.10);
 
 // DEBUG_FINAL=0, DEBUG_ALBEDO=1, DEBUG_NORMAL=2, DEBUG_MATERIAL=3,
-// DEBUG_DEPTH=4, DEBUG_CASCADES=5, DEBUG_SHADOW=6
+// DEBUG_DEPTH=4, DEBUG_CASCADES=5
 void main() {
     vec3 col = vec3(0.0);
 
@@ -51,7 +49,7 @@ void main() {
         float z_far  = g.sun_dir.w;
         float range  = max(z_far - z_near, 1e-6);
         col = vec3(clamp((linear_z - z_near) / range, 0.0, 1.0));
-    } else if (pc.mode == 5u) {
+    } else {
         // CSM cascade index. tinting the lit scene rather than filling flat
         // colour keeps silhouettes readable, so you can see where on the
         // geometry a split actually lands.
@@ -65,18 +63,6 @@ void main() {
         float luma = dot(clamp(texture(t_scene, v_uv).rgb, 0.0, 1.0),
                          vec3(0.299, 0.587, 0.114));
         col = TINT[cascade] * (0.25 + 0.75 * luma);
-    } else {
-        // raw CSM visibility term, exactly as lighting.frag samples it:
-        // white = lit, black = occluded.
-        float d = texture(t_depth, v_uv).r;
-        if (d >= 1.0) { out_color = vec4(SKY, 1.0); return; }
-
-        vec3 vp      = view_pos_at(v_uv, d);
-        vec3 P       = (g.inv_view * vec4(vp, 1.0)).xyz;
-        vec3 N       = decode_octahedral(texture(t_normal, v_uv).rg);
-        int  cascade = select_cascade(-vp.z, g.cascade_splits);
-
-        col = vec3(sample_shadow(t_shadow, g.cascade_view_proj[cascade], cascade, P, N));
     }
 
     out_color = vec4(col, 1.0);

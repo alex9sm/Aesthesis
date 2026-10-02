@@ -1,4 +1,5 @@
 #include "vk_pch.hpp"
+#include "shared.glsl"
 #include "vk_lights.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
@@ -23,7 +24,7 @@ namespace vk {
 	static bool create_buffers() {
 		VmaAllocator a = allocator();
 
-		VkDeviceSize size = (VkDeviceSize)sizeof(PointLightGPU) * MAX_POINT_LIGHTS;
+		VkDeviceSize size = (VkDeviceSize)sizeof(LightGPU) * MAX_LIGHTS;
 
 		for (u32 i = 0; i < FRAMES_IN_FLIGHT; i++) {
 			VkBufferCreateInfo bci = {};
@@ -50,7 +51,7 @@ namespace vk {
 	static void write_descriptors() {
 		Context& c = context();
 
-		VkDeviceSize size = (VkDeviceSize)sizeof(PointLightGPU) * MAX_POINT_LIGHTS;
+		VkDeviceSize size = (VkDeviceSize)sizeof(LightGPU) * MAX_LIGHTS;
 
 		for (u32 i = 0; i < FRAMES_IN_FLIGHT; i++) {
 			VkDescriptorBufferInfo bi = {};
@@ -61,7 +62,7 @@ namespace vk {
 			VkWriteDescriptorSet w = {};
 			w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			w.dstSet = global_set_for_frame(i);
-			w.dstBinding = 7;
+			w.dstBinding = BIND_LIGHTS;
 			w.descriptorCount = 1;
 			w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			w.pBufferInfo = &bi;
@@ -92,11 +93,11 @@ namespace vk {
 		write_cursor = 0;
 	}
 
-	u32 push_light(const PointLightGPU& data) {
-		if (write_cursor >= MAX_POINT_LIGHTS) return UINT32_MAX;
+	u32 push_light(const LightGPU& data) {
+		if (write_cursor >= MAX_LIGHTS) return UINT32_MAX;
 		u32 i = current_frame_index();
-		PointLightGPU* dst = (PointLightGPU*)frames[i].mapped + write_cursor;
-		memory::copy(dst, &data, sizeof(PointLightGPU));
+		LightGPU* dst = (LightGPU*)frames[i].mapped + write_cursor;
+		memory::copy(dst, &data, sizeof(LightGPU));
 		return write_cursor++;
 	}
 

@@ -41,8 +41,12 @@ namespace renderer {
 	static mat4 frame_projection = {};
 	static bool frame_active = false;
 	static mat4 frame_cascade_vp[vk::CASCADE_COUNT] = {};
+	static mat4 frame_spot_vp[vk::SPOT_SHADOW_SLOTS] = {};
+	static u32  spot_shadow_count = 0;
+	static Frustum frame_frustum = {};
 
 	static u32 g_debug_mode = DEBUG_FINAL;
+	static f32 g_exposure   = 1.0f;
 
 	// persistent sun state. defaults provide a sane fallback if the scene
 	// never calls set_sun (white light, straight down, low intensity).
@@ -60,10 +64,17 @@ namespace renderer {
 		mat4           local_transform;
 	};
 
+	// a model exclusively owns the textures/materials/meshes it created
 	struct ModelInternal {
-		ModelNode* nodes;
-		u32        node_count;
-		bool       in_use;
+		ModelNode*      nodes;
+		u32             node_count;
+		TextureHandle*  textures;
+		u32             texture_count;
+		MaterialHandle* materials;
+		u32             material_count;
+		MeshHandle*     meshes;
+		u32             mesh_count;
+		bool            in_use;
 	};
 
 	static ModelInternal models[MAX_MODELS] = {};
@@ -114,12 +125,7 @@ namespace renderer {
 	}
 
 	void shutdown() {
-		for (u32 i = 0; i < MAX_MODELS; i++) {
-			if (models[i].in_use && models[i].nodes) {
-				memory::free(models[i].nodes);
-			}
-		}
-		memory::set(models, 0, sizeof(models));
+		for (u32 i = 0; i < MAX_MODELS; i++) unload_model(i);
 
 		// fonts release their bindless texture slot only — vk::shutdown will
 		// tear down all remaining textures regardless.
@@ -141,6 +147,7 @@ namespace renderer {
 	}
 
 	void unload_mesh(MeshHandle handle) {
+		vk::wait_idle();
 		vk::destroy_mesh(handle);
 	}
 
@@ -151,6 +158,7 @@ namespace renderer {
 	}
 
 	void unload_texture(TextureHandle handle) {
+		vk::wait_idle();
 		vk::unload_texture(handle);
 	}
 
@@ -186,6 +194,7 @@ namespace renderer {
 	}
 
 	void unload_material(MaterialHandle handle) {
+		vk::wait_idle();
 		vk::unload_material(handle);
 	}
 
@@ -264,6 +273,12 @@ namespace renderer {
 		ModelInternal& mi = models[slot];
 		mi.in_use = true;
 		mi.node_count = 0;
+		mi.textures = texture_handles;
+		mi.texture_count = gm.texture_count;
+		mi.materials = material_handles;
+		mi.material_count = gm.material_count;
+		mi.meshes = prim_handles;
+		mi.mesh_count = gm.primitive_count;
 		mi.nodes = (gm.node_count > 0)
 			? (ModelNode*)memory::malloc(sizeof(ModelNode) * gm.node_count)
 			: nullptr;
@@ -282,10 +297,6 @@ namespace renderer {
 			mi.nodes[mi.node_count++] = { mh, matp, gn.world_transform };
 		}
 
-		if (texture_handles)  memory::free(texture_handles);
-		if (material_handles) memory::free(material_handles);
-		if (prim_handles)     memory::free(prim_handles);
-
 		free_gltf_model(&gm);
 		return slot;
 	}
@@ -294,10 +305,22 @@ namespace renderer {
 		if (handle >= MAX_MODELS) return;
 		ModelInternal& mi = models[handle];
 		if (!mi.in_use) return;
-		if (mi.nodes) memory::free(mi.nodes);
-		mi.nodes = nullptr;
-		mi.node_count = 0;
-		mi.in_use = false;
+
+		vk::wait_idle();
+		// load failures fall back to engine-reserved slots, which must never be freed
+		for (u32 i = 0; i < mi.mesh_count; i++) vk::destroy_mesh(mi.meshes[i]);
+		for (u32 i = 0; i < mi.material_count; i++) {
+			if (mi.materials[i] != DEFAULT_MATERIAL_HANDLE) vk::unload_material(mi.materials[i]);
+		}
+		for (u32 i = 0; i < mi.texture_count; i++) {
+			if (mi.textures[i] > DEFAULT_ORM) vk::unload_texture(mi.textures[i]);
+		}
+
+		if (mi.nodes)     memory::free(mi.nodes);
+		if (mi.meshes)    memory::free(mi.meshes);
+		if (mi.materials) memory::free(mi.materials);
+		if (mi.textures)  memory::free(mi.textures);
+		mi = {};
 	}
 
 	// --- lighting ---
@@ -309,12 +332,63 @@ namespace renderer {
 		g_sun_intensity = intensity;
 	}
 
-	void submit_light(vec3 position, vec3 color, f32 radius, f32 intensity) {
+	// shadow_vp != nullptr requests an atlas slot; shadow_texel = world texel size per unit distance
+	static void push_light(vec3 position, vec3 color, f32 range, f32 intensity, f32 source_radius,
+		vec3 direction, f32 cos_outer, f32 cone_scale, const mat4* shadow_vp = nullptr, f32 shadow_texel = 0.0f)
+	{
 		if (!frame_active) return;
-		vk::PointLightGPU light = {};
-		light.position_radius = { position.x, position.y, position.z, radius };
-		light.color_intensity = { color.x, color.y, color.z, intensity };
-		vk::push_light(light);
+		// the light's range sphere bounds everything it can reach, spots included
+		if (!frustum_test_sphere(frame_frustum, position, range)) return;
+
+		bool shadowed = shadow_vp && spot_shadow_count < vk::SPOT_SHADOW_SLOTS;
+		static bool warned_shadow = false;
+		if (shadow_vp && !shadowed && !warned_shadow) {
+			logger::error("More than %u visible shadowed spots; extras unshadowed", vk::SPOT_SHADOW_SLOTS);
+			warned_shadow = true;
+		}
+
+		vk::LightGPU l = {};
+		l.position_range    = { position.x, position.y, position.z, range };
+		l.color_source      = { color.x * intensity, color.y * intensity, color.z * intensity, source_radius };
+		l.direction_cos_out = { direction.x, direction.y, direction.z, cos_outer };
+		l.params            = { cone_scale, shadowed ? (f32)spot_shadow_count : -1.0f, shadow_texel, 0.0f };
+		static bool warned = false;
+		if (vk::push_light(l) == UINT32_MAX) {
+			if (!warned) logger::error("More than %u visible lights; extras dropped", vk::MAX_LIGHTS);
+			warned = true;
+			return;
+		}
+		if (shadowed) frame_spot_vp[spot_shadow_count++] = *shadow_vp;
+	}
+
+	void submit_point_light(vec3 position, vec3 color, f32 range, f32 intensity, f32 source_radius) {
+		push_light(position, color, range, intensity, source_radius, { 0.0f, 0.0f, 0.0f }, -2.0f, 1.0f);
+	}
+
+	void submit_spot_light(vec3 position, vec3 color, f32 range, f32 intensity, f32 source_radius,
+		vec3 direction, f32 inner_deg, f32 outer_deg, bool casts_shadow)
+	{
+		if (dot(direction, direction) <= 0.0f) return;
+		// the shadow frustum's fov is 2 * outer, which has to stay well short of 180
+		if (casts_shadow && outer_deg > 80.0f) outer_deg = 80.0f;
+		vec3 dir = normalize(direction);
+		f32 outer = to_radians(outer_deg);
+		f32 cos_outer = math::cos(outer);
+		f32 cos_inner = math::cos(to_radians(inner_deg < outer_deg ? inner_deg : outer_deg));
+		f32 span = cos_inner - cos_outer;
+		f32 cone_scale = 1.0f / (span > 1e-4f ? span : 1e-4f);
+
+		if (!casts_shadow) {
+			push_light(position, color, range, intensity, source_radius, dir, cos_outer, cone_scale);
+			return;
+		}
+		vec3 up = { 0.0f, 1.0f, 0.0f };
+		if (math::abs(dir.y) > 0.99f) up = { 0.0f, 0.0f, 1.0f };
+		// the cone is inscribed in the square frustum, so the whole lit area lands in the tile
+		mat4 vp = mat4_perspective_vk(2.0f * outer, 1.0f, vk::SPOT_SHADOW_NEAR, range)
+			* mat4_look_at(position, position + dir, up);
+		f32 texel = 2.0f * math::tan(outer) / (f32)vk::SPOT_TILE_SIZE;
+		push_light(position, color, range, intensity, source_radius, dir, cos_outer, cone_scale, &vp, texel);
 	}
 
 	// --- frame ---
@@ -323,7 +397,9 @@ namespace renderer {
 		frame_view = view;
 		frame_projection = projection;
 		draw_count = 0;
+		spot_shadow_count = 0;
 		frame_active = vk::begin_frame();
+		frame_frustum = build_frustum(view, projection);
 
 		if (frame_active) {
 			vk::reset_lights();
@@ -441,27 +517,32 @@ namespace renderer {
 
 		vk::reset_instances();
 
+		// sun cascades first, then occupied spot slots; each culls casters against its own frustum
+		static constexpr u32 MAX_SHADOW_VIEWS = vk::CASCADE_COUNT + vk::SPOT_SHADOW_SLOTS;
 		static PendingDraw   shadow_visible[vk::MAX_DRAWS_PER_FRAME];
 		static PendingDraw   shadow_scratch[vk::MAX_DRAWS_PER_FRAME];
-		static vk::DrawBatch shadow_batches[vk::CASCADE_COUNT][vk::MAX_DRAWS_PER_FRAME];
-		vk::CascadeBatches cascades[vk::CASCADE_COUNT] = {};
+		static vk::DrawBatch shadow_batches[MAX_SHADOW_VIEWS][vk::MAX_DRAWS_PER_FRAME];
+		vk::ShadowView views[MAX_SHADOW_VIEWS] = {};
 
-		for (u32 c = 0; c < vk::CASCADE_COUNT; c++) {
-			Frustum cf = frustum_from_vp(frame_cascade_vp[c]);
+		// a zero-intensity sun contributes nothing, so its cascades aren't culled or rendered
+		bool sun_on = g_sun_intensity > 0.0f;
+		for (u32 v = sun_on ? 0 : vk::CASCADE_COUNT; v < vk::CASCADE_COUNT + spot_shadow_count; v++) {
+			views[v].view_proj = v < vk::CASCADE_COUNT ? frame_cascade_vp[v] : frame_spot_vp[v - vk::CASCADE_COUNT];
+			Frustum vf = frustum_from_vp(views[v].view_proj);
 			u32 visible = 0;
 			for (u32 r = 0; r < draw_count; r++) {
-				if (cull_test(cf, draw_queue[r].mesh, draw_queue[r].model)) {
+				if (cull_test(vf, draw_queue[r].mesh, draw_queue[r].model)) {
 					shadow_visible[visible++] = draw_queue[r];
 				}
 			}
-			cascades[c].batches = shadow_batches[c];
-			cascades[c].count = build_batches(shadow_visible, visible,
-				shadow_scratch, shadow_batches[c]);
+			views[v].batches = shadow_batches[v];
+			views[v].count = build_batches(shadow_visible, visible,
+				shadow_scratch, shadow_batches[v]);
 		}
 
 		// frustum cull
 		{
-			Frustum f = build_frustum(frame_view, frame_projection);
+			const Frustum& f = frame_frustum;
 			u32 w = 0;
 			for (u32 r = 0; r < draw_count; r++) {
 				if (cull_test(f, draw_queue[r].mesh, draw_queue[r].model)) {
@@ -477,12 +558,14 @@ namespace renderer {
 		u32 batch_count = build_batches(draw_queue, draw_count, sorted, batches);
 
 		vk::patch_globals_misc({ (f32)vk::light_count(), 0.0f, 0.0f, 0.0f });
+		vk::patch_globals_spot_shadows(frame_spot_vp, spot_shadow_count);
 
-		vk::execute_shadow_pass(cmd, cascades);
+		vk::execute_shadow_pass(cmd, sun_on ? views : nullptr);
+		vk::execute_spot_shadow_pass(cmd, views + vk::CASCADE_COUNT, spot_shadow_count);
 		vk::execute_depth_prepass(cmd, batches, batch_count);
 		vk::execute_gbuffer_pass(cmd, batches, batch_count);
 		vk::execute_lighting_pass(cmd);
-		vk::execute_debug_pass(cmd, image_index, g_debug_mode);
+		vk::execute_debug_pass(cmd, image_index, g_debug_mode, g_exposure);
 		vk::execute_overlay_pass(cmd, image_index);
 
 		vk::end_frame();
@@ -532,7 +615,7 @@ namespace renderer {
 		FontInternal& f = fonts[handle];
 		if (!f.in_use) return;
 		if (f.atlas_tex != INVALID_TEXTURE) {
-			vk::unload_texture(f.atlas_tex);
+			unload_texture(f.atlas_tex);
 		}
 		memory::set(&f, 0, sizeof(f));
 	}
@@ -572,6 +655,10 @@ namespace renderer {
 
 			pen_x += g.xadvance * scale;
 		}
+	}
+
+	void set_exposure(f32 exposure) {
+		g_exposure = (exposure > 0.0f) ? exposure : 0.0f;
 	}
 
 	void cycle_debug_mode() {

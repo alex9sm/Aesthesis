@@ -1,4 +1,5 @@
 #include "vk_pch.hpp"
+#include "shared.glsl"
 #include "vk_instance.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
@@ -61,7 +62,7 @@ namespace vk {
 			VkWriteDescriptorSet w = {};
 			w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			w.dstSet = global_set_for_frame(i);
-			w.dstBinding = 1;
+			w.dstBinding = BIND_INSTANCES;
 			w.descriptorCount = 1;
 			w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			w.pBufferInfo = &bi;

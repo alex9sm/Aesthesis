@@ -28,3 +28,20 @@ float sample_shadow(sampler2DArrayShadow t_shadow, mat4 cascade_view_proj,
     vec2 uv = vec2(light_ndc.x * 0.5 + 0.5, 0.5 - light_ndc.y * 0.5);
     return texture(t_shadow, vec4(uv, float(cascade), light_ndc.z));
 }
+
+// Spot shadow atlas: slot i lives in tile (i % COLS, i / COLS). texel_scale is the world
+// size of one shadow texel per unit distance from the light, so the normal offset grows
+// with distance the way a perspective texel does.
+const float SPOT_NORMAL_BIAS_TEXELS = 1.5;
+
+float sample_spot_shadow(sampler2DShadow t_atlas, mat4 view_proj, int slot,
+                         vec3 P, vec3 N, float dist, float texel_scale) {
+    vec4 clip = view_proj * vec4(P + N * (dist * texel_scale * SPOT_NORMAL_BIAS_TEXELS), 1.0);
+    vec3 ndc  = clip.xyz / clip.w;
+    // clamp half a texel inside the tile so the PCF footprint never reads a neighbour
+    const float half_texel = 0.5 / float(SHARED_SPOT_TILE_SIZE);
+    vec2 local = clamp(vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5), half_texel, 1.0 - half_texel);
+    const vec2 grid = vec2(SHARED_SPOT_ATLAS_COLS, SHARED_SPOT_SHADOW_SLOTS / SHARED_SPOT_ATLAS_COLS);
+    vec2 tile = vec2(slot % SHARED_SPOT_ATLAS_COLS, slot / SHARED_SPOT_ATLAS_COLS);
+    return texture(t_atlas, vec3((tile + local) / grid, ndc.z));
+}

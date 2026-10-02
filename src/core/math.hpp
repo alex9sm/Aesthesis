@@ -508,6 +508,14 @@ inline Frustum frustum_from_vp(mat4 vp) {
     return f;
 }
 
+inline bool frustum_test_sphere(const Frustum& f, vec3 center, f32 radius) {
+    for (int i = 0; i < 6; i++) {
+        vec3 n = { f.planes[i].x, f.planes[i].y, f.planes[i].z };
+        if (dot(n, center) + f.planes[i].w < -radius) return false;
+    }
+    return true;
+}
+
 inline bool frustum_test_aabb(const Frustum& f, const AABB& box) {
     for (int i = 0; i < 6; i++) {
         vec3 n = { f.planes[i].x, f.planes[i].y, f.planes[i].z };

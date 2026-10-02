@@ -16,6 +16,7 @@ layout(set = 0, binding = BIND_GLOBALS) uniform Globals {
     vec4 misc;           // x = point_light_count
     mat4 cascade_view_proj[SHARED_CASCADE_COUNT];
     vec4 cascade_splits; // x/y/z = view-space far distance of cascades 0/1/2
+    mat4 spot_shadow_vp[SHARED_SPOT_SHADOW_SLOTS];
 } g;
 
 // must match vk::InstanceData (vk_instance.hpp)

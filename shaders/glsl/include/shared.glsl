@@ -14,10 +14,17 @@
 #define BIND_BRDF_LUT    6
 #define BIND_LIGHTS      7
 #define BIND_SHADOW      8
-#define BIND_COUNT       9
+#define BIND_SPOT_SHADOW 9
+#define BIND_COUNT       10
 
 #define SHARED_MAX_TEXTURES         256
 #define SHARED_CASCADE_COUNT        3
 #define SHARED_PREFILTER_MIP_COUNT  5
+
+// spot shadow atlas: SLOTS tiles of TILE_SIZE^2, COLS per row
+#define SHARED_SPOT_SHADOW_SLOTS    8
+#define SHARED_SPOT_ATLAS_COLS      4
+#define SHARED_SPOT_TILE_SIZE       1024
+#define SHARED_SPOT_SHADOW_NEAR     0.05
 
 #endif

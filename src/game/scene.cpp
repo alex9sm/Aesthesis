@@ -22,11 +22,11 @@ namespace scene {
 
 	bool init() {
 		//helmet = renderer::load_model("assets/models/damagedhelmet/DamagedHelmet.gltf");
-		//chess = renderer::load_model("assets/models/chess/chess.gltf");
-		room = renderer::load_model("assets/models/testroom/testingroom.glb");
+		chess = renderer::load_model("assets/models/chess/chess.gltf");
+		room = renderer::load_model("assets/models/testroom/testingroom.gltf");
 
 		renderer::set_sun({ 0.38f, 1.0f, 0.41f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
-		//env_cubemap = renderer::load_cubemap("field", 1.0f);
+		env_cubemap = renderer::load_cubemap("night", 1.0f);
 		renderer::set_environment_cubemap(env_cubemap);
 
 		hud_font = renderer::load_font("assets/textures/global/NeueHaasDisplayMediu.ttf", 24.0f);

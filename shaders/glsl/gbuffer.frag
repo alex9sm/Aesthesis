@@ -38,18 +38,22 @@ void main() {
     // dynamically uniform — nonuniformEXT is required.
     vec4 base  = texture(u_textures[nonuniformEXT(m.albedo_idx)], v_uv);
     vec3 orm   = texture(u_textures[nonuniformEXT(m.orm_idx)],    v_uv).rgb;
-    vec3 n_tex = texture(u_textures[nonuniformEXT(m.normal_idx)], v_uv).xyz * 2.0 - 1.0;
 
     vec3 albedo = base.rgb * m.base_color_factor.rgb * v_tint.rgb;
     float ao = orm.r;
     float metallic  = orm.b * m.mr_factors.x;
     float roughness = orm.g * m.mr_factors.y;
 
-    // Gram-Schmidt re-orthogonalize the interpolated tangent to the normal.
+    // No normal map: skip the TBN, which degenerates when tangents are missing.
     vec3 N = normalize(v_normal_ws);
-    vec3 T = normalize(v_tangent_ws - dot(v_tangent_ws, N) * N);
-    vec3 B = cross(N, T) * v_tangent_sign;
-    vec3 world_n = normalize(mat3(T, B, N) * n_tex);
+    vec3 world_n = N;
+    if (m.normal_idx != SHARED_TEX_DEFAULT_NORMAL) {
+        vec3 n_tex = texture(u_textures[nonuniformEXT(m.normal_idx)], v_uv).xyz * 2.0 - 1.0;
+        // Gram-Schmidt re-orthogonalize the interpolated tangent to the normal.
+        vec3 T = normalize(v_tangent_ws - dot(v_tangent_ws, N) * N);
+        vec3 B = cross(N, T) * v_tangent_sign;
+        world_n = normalize(mat3(T, B, N) * n_tex);
+    }
 
     out_albedo   = vec4(albedo, ao);
     out_normal   = encode_octahedral(world_n);

@@ -15,7 +15,7 @@ namespace vk {
 
 	// reserved slots, populated at init time
 	static constexpr TextureHandle TEX_DEFAULT_ALBEDO = 0;  // 1x1 white
-	static constexpr TextureHandle TEX_DEFAULT_NORMAL = 1;  // 1x1 flat-normal (0.5, 0.5, 1)
+	static constexpr TextureHandle TEX_DEFAULT_NORMAL = SHARED_TEX_DEFAULT_NORMAL;  // 1x1 flat-normal (0.5, 0.5, 1)
 	static constexpr TextureHandle TEX_DEFAULT_ORM    = 2;  // 1x1 ORM neutral (AO=1, R=1, M=0)
 
 	bool init_textures();

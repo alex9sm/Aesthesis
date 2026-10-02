@@ -21,6 +21,9 @@
 #define SHARED_CASCADE_COUNT        3
 #define SHARED_PREFILTER_MIP_COUNT  5
 
+// reserved bindless texture slot for the flat default normal
+#define SHARED_TEX_DEFAULT_NORMAL   1
+
 // spot shadow atlas: SLOTS tiles of TILE_SIZE^2, COLS per row
 #define SHARED_SPOT_SHADOW_SLOTS    8
 #define SHARED_SPOT_ATLAS_COLS      4

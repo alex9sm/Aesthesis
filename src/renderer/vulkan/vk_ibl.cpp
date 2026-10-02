@@ -1,10 +1,6 @@
 #include "vk_pch.hpp"
 #include "shared.glsl"
 
-#ifndef _CRT_SECURE_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "vk_ibl.hpp"
 #include "vk_init.hpp"
 #include "vk_memory.hpp"
@@ -16,16 +12,12 @@
 #include "log.hpp"
 #include "memory.hpp"
 
-// stb_image's IMPLEMENTATION is in vk_texture.cpp.
-#include "stb_image.h"
-
 namespace vk {
 
 	static constexpr u32 BRDF_LUT_SIZE       = 256;
 	static constexpr u32 IRRADIANCE_SIZE     = 32;
 	static constexpr u32 PREFILTER_SIZE      = 128;
 	static constexpr u32 PREFILTER_MIP_COUNT = SHARED_PREFILTER_MIP_COUNT;
-	static constexpr const char* BRDF_LUT_PNG = "assets/textures/global/brdf_lut.png";
 
 	struct PrefilterPC {
 		f32 roughness;
@@ -165,71 +157,8 @@ namespace vk {
 		return true;
 	}
 
-	// Try to load the shipped BRDF LUT PNG. PNG R/G channels carry scale/bias,
-	// B/A are ignored. Returns false if the file is missing or unexpected size.
-	static bool try_load_brdf_lut_png() {
-		int w = 0, h = 0, ch = 0;
-		stbi_uc* data = stbi_load(BRDF_LUT_PNG, &w, &h, &ch, 4);
-		if (!data) {
-			return false;
-		}
-		if (w != (int)BRDF_LUT_SIZE || h != (int)BRDF_LUT_SIZE) {
-			logger::warn("BRDF LUT PNG has unexpected size %dx%d (expected %ux%u); falling back to compute bake",
-				w, h, BRDF_LUT_SIZE, BRDF_LUT_SIZE);
-			stbi_image_free(data);
-			return false;
-		}
-
-		// build an RGBA16F buffer from RGBA8 (only R/G are meaningful)
-		VkDeviceSize byte_size = (VkDeviceSize)w * h * 8; // 4 channels * 2 bytes
-
-		VkCommandBuffer cmd = begin_upload();
-
-		StagingBlock staging = {};
-		if (!stage_alloc(byte_size, &staging)) {
-			logger::error("BRDF LUT PNG staging allocation failed");
-			end_upload();
-			stbi_image_free(data);
-			return false;
-		}
-
-		u16* dst = (u16*)staging.mapped;
-		const f32 inv = 1.0f / 255.0f;
-		u32 texels = (u32)(w * h);
-		for (u32 i = 0; i < texels; i++) {
-			f32 r = (f32)data[i * 4 + 0] * inv;
-			f32 g = (f32)data[i * 4 + 1] * inv;
-			dst[i * 4 + 0] = float_to_half(r);
-			dst[i * 4 + 1] = float_to_half(g);
-			dst[i * 4 + 2] = 0;
-			dst[i * 4 + 3] = 0;
-		}
-		stbi_image_free(data);
-
-		simple_barrier(cmd, brdf_lut.image,
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			0, VK_ACCESS_TRANSFER_WRITE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-		VkBufferImageCopy region = {};
-		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		region.imageSubresource.layerCount = 1;
-		region.imageExtent = { BRDF_LUT_SIZE, BRDF_LUT_SIZE, 1 };
-		vkCmdCopyBufferToImage(cmd, staging.buffer, brdf_lut.image,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-		simple_barrier(cmd, brdf_lut.image,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-
-		end_upload();
-
-		return true;
-	}
-
-	// Compute fallback: bake the BRDF LUT with brdf_lut.comp.
-	static bool bake_brdf_lut_compute() {
+	// Bake the BRDF LUT with brdf_lut.comp (full precision; an 8-bit asset bands).
+	static bool bake_brdf_lut() {
 		Context& c = context();
 
 		// descriptor set layout: single storage image
@@ -321,7 +250,6 @@ namespace vk {
 		vkDestroyPipelineLayout(c.device, pipeline_layout, nullptr);
 		vkDestroyDescriptorSetLayout(c.device, set_layout, nullptr);
 
-		logger::info("BRDF LUT baked via compute (%ux%u)", BRDF_LUT_SIZE, BRDF_LUT_SIZE);
 		return true;
 	}
 
@@ -938,11 +866,7 @@ namespace vk {
 		if (!create_sampler()) return false;
 		if (!create_brdf_lut_image()) return false;
 
-		// PNG load path first; fall back to compute bake if the asset is missing
-		// or the wrong size. Either way the LUT ends up in SHADER_READ_ONLY.
-		if (!try_load_brdf_lut_png()) {
-			if (!bake_brdf_lut_compute()) return false;
-		}
+		if (!bake_brdf_lut()) return false;
 
 		// neutral mid-grey placeholders so set-0 bindings 4 & 5 always sample
 		// something well-defined before the first set_environment_cubemap call.

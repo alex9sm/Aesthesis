@@ -45,6 +45,10 @@ void main() {
     vec3  prefiltered  = vec3(0.0);
     float total_weight = 0.0;
 
+    float src_res  = float(textureSize(u_source, 0).x);
+    float sa_texel = 4.0 * IBL_PI / (6.0 * src_res * src_res);
+    float a2       = pc.roughness * pc.roughness * pc.roughness * pc.roughness;
+
     for (uint i = 0u; i < SAMPLES; i++) {
         vec2 Xi = hammersley(i, SAMPLES);
         vec3 H  = importance_sample_ggx(Xi, N, pc.roughness);
@@ -52,10 +56,16 @@ void main() {
 
         float NdotL = max(dot(N, L), 0.0);
         if (NdotL > 0.0) {
-            // textureLod with mip 0 — could be improved with the
-            // Křivánek/Colbert mip-selection trick, but mip 0 is correct.
+            // Filtered importance sampling (Křivánek/Colbert): read the source mip whose
+            // texel matches this sample's solid angle. V == N, so pdf = D / 4.
+            float NdotH     = max(dot(N, H), 0.0);
+            float d         = NdotH * NdotH * (a2 - 1.0) + 1.0;
+            float pdf       = a2 / (IBL_PI * d * d) * 0.25 + 1e-4;
+            float sa_sample = 1.0 / (float(SAMPLES) * pdf);
+            float mip       = pc.roughness == 0.0 ? 0.0 : 0.5 * log2(sa_sample / sa_texel);
+
             vec3 Ls = vec3(L.x, -L.z, L.y);
-            prefiltered += textureLod(u_source, Ls, 0.0).rgb * NdotL;
+            prefiltered += textureLod(u_source, Ls, mip).rgb * NdotL;
             total_weight += NdotL;
         }
     }

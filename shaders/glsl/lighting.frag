@@ -13,6 +13,8 @@ layout(location = 0) out vec4 out_color;
 layout(set = 0, binding = BIND_IRRADIANCE) uniform samplerCube t_irradiance;
 layout(set = 0, binding = BIND_PREFILTER) uniform samplerCube t_prefilter;
 layout(set = 0, binding = BIND_BRDF_LUT) uniform sampler2D   t_brdf_lut;
+// active environment's source cubemap, or a flat-colour placeholder; scaled by g.misc.y.
+layout(set = 0, binding = BIND_SKY) uniform samplerCube t_sky;
 
 // comparison sampler; texture() returns the PCF-filtered compare result in [0,1].
 layout(set = 0, binding = BIND_SHADOW) uniform sampler2DArrayShadow t_shadow;
@@ -47,7 +49,9 @@ vec3 fresnel_schlick(float cos_theta, vec3 F0) {
 void main() {
     float d = texture(t_depth, v_uv).r;
     if (d >= 1.0) {
-        out_color = vec4(0.05, 0.07, 0.10, 1.0);
+        vec4 far_view = g.inv_proj * vec4(v_uv.x * 2.0 - 1.0, 1.0 - v_uv.y * 2.0, 1.0, 1.0);
+        vec3 dir      = mat3(g.inv_view) * (far_view.xyz / far_view.w);
+        out_color = vec4(texture(t_sky, dir).rgb * g.misc.y, 1.0);
         return;
     }
 

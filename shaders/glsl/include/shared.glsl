@@ -15,7 +15,8 @@
 #define BIND_LIGHTS      7
 #define BIND_SHADOW      8
 #define BIND_SPOT_SHADOW 9
-#define BIND_COUNT       10
+#define BIND_SKY         10
+#define BIND_COUNT       11
 
 #define SHARED_MAX_TEXTURES         256
 #define SHARED_CASCADE_COUNT        3

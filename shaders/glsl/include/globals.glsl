@@ -13,7 +13,7 @@ layout(set = 0, binding = BIND_GLOBALS) uniform Globals {
     vec4 sun_dir;        // w = z_far
     vec4 sun_color;      // w = intensity
     vec4 viewport_size;  // x=width, y=height, z=1/w, w=1/h
-    vec4 misc;           // x = point_light_count
+    vec4 misc;           // x = point_light_count, y = sky intensity
     mat4 cascade_view_proj[SHARED_CASCADE_COUNT];
     vec4 cascade_splits; // x/y/z = view-space far distance of cascades 0/1/2
     mat4 spot_shadow_vp[SHARED_SPOT_SHADOW_SLOTS];

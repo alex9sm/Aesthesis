@@ -28,11 +28,13 @@ namespace vk {
 	// resources stored on the slot, and nulls them. Idempotent.
 	void release_bake_resources(CubemapSlot* slot);
 
-	// Selects which cubemap drives IBL diffuse (BIND_IRRADIANCE) + specular
-	// (BIND_PREFILTER). Pure descriptor write across all frames-in-flight.
-	// INVALID_CUBEMAP reverts to neutral placeholders. Must be called outside
-	// begin_frame / end_frame.
+	// Selects which cubemap drives IBL diffuse (BIND_IRRADIANCE), specular
+	// (BIND_PREFILTER) and the visible sky (BIND_SKY, source cubemap). Pure
+	// descriptor write across all frames-in-flight. INVALID_CUBEMAP reverts to
+	// placeholders (flat sky colour). Must be called outside begin_frame / end_frame.
 	void          set_environment_cubemap(CubemapHandle handle);
 	CubemapHandle active_environment();
+	// active cubemap's intensity, 1 when none is set (sky brightness, Globals misc.y)
+	f32           environment_intensity();
 
 }

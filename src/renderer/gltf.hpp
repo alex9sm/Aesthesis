@@ -56,12 +56,28 @@ namespace renderer {
 		char path[512];
 	};
 
-	// a single scene node baked to world-space (within the model), referencing
-	// one primitive + the material override for that primitive.
+	// physics flags from the Blender object's custom properties (glTF node extras).
+	// the renderer ignores these; physics::create_bodies reads them.
+	enum class PhysicsType  : u8 { None, Static, Dynamic };
+	enum class PhysicsShape : u8 { Auto, Box, Sphere, Hull, Mesh };   // Auto: mesh if static, hull if dynamic
+
+	struct ObjectPhysics {
+		PhysicsType  type;
+		PhysicsShape shape;
+		f32          mass;
+	};
+
+	// one glTF node with a mesh = one Blender object, baked to world-space (within the model)
+	struct GltfObject {
+		mat4          world_transform;
+		ObjectPhysics physics;
+	};
+
+	// one primitive of an object (a Blender object has one per material slot)
 	struct GltfNode {
-		u32  primitive_index;
-		u32  material_index;
-		mat4 world_transform;
+		u32 primitive_index;
+		u32 material_index;
+		u32 object_index;
 	};
 
 	struct GltfModel {
@@ -71,6 +87,8 @@ namespace renderer {
 		u32               material_count;
 		GltfTexturePath*  textures;
 		u32               texture_count;
+		GltfObject*       objects;
+		u32               object_count;
 		GltfNode*         nodes;
 		u32               node_count;
 	};

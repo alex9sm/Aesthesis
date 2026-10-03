@@ -9,6 +9,8 @@
 #include "string.hpp"
 #include "log.hpp"
 
+#include <stdlib.h>
+
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
@@ -267,6 +269,55 @@ namespace renderer {
 	// per node-with-mesh. parent_matrix is multiplied into the node's local
 	// transform to produce the world transform.
 	//
+	// value of a top-level key in a flat extras JSON object, quotes stripped
+	static bool extras_value(const char* json, const char* key, char* out, usize max) {
+		char pattern[64];
+		str::format(pattern, sizeof(pattern), "\"%s\"", key);
+		const char* p = str::find(json, pattern);
+		if (!p) return false;
+		p = str::find_char(p + str::length(pattern), ':');
+		if (!p) return false;
+		p++;
+		while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+
+		bool quoted = *p == '"';
+		if (quoted) p++;
+		usize n = 0;
+		while (*p && n + 1 < max) {
+			if (quoted ? *p == '"' : (*p == ',' || *p == '}' || *p == ' ' || *p == '\r' || *p == '\n')) break;
+			out[n++] = *p++;
+		}
+		out[n] = 0;
+		return n > 0;
+	}
+
+	static ObjectPhysics parse_physics(const cgltf_node* node) {
+		ObjectPhysics ph = { PhysicsType::None, PhysicsShape::Auto, 10.0f };
+		const char* json = node->extras.data;
+		if (!json) return ph;
+
+		const char* name = node->name ? node->name : "<unnamed>";
+		char v[32];
+		if (extras_value(json, "physics", v, sizeof(v))) {
+			if      (str::equal(v, "static"))  ph.type = PhysicsType::Static;
+			else if (str::equal(v, "dynamic")) ph.type = PhysicsType::Dynamic;
+			else logger::warn("glTF object '%s': unknown physics '%s'", name, v);
+		}
+		if (extras_value(json, "shape", v, sizeof(v))) {
+			if      (str::equal(v, "box"))    ph.shape = PhysicsShape::Box;
+			else if (str::equal(v, "sphere")) ph.shape = PhysicsShape::Sphere;
+			else if (str::equal(v, "hull"))   ph.shape = PhysicsShape::Hull;
+			else if (str::equal(v, "mesh"))   ph.shape = PhysicsShape::Mesh;
+			else logger::warn("glTF object '%s': unknown shape '%s'", name, v);
+		}
+		if (extras_value(json, "mass", v, sizeof(v))) ph.mass = (f32)atof(v);
+
+		if (ph.type == PhysicsType::Dynamic && node->children_count > 0) {
+			logger::warn("glTF object '%s': children of a dynamic object won't follow it", name);
+		}
+		return ph;
+	}
+
 	// `prim_offset_per_mesh[i]` gives cgltf mesh i's first slot in the flat
 	// (mesh, primitive) slot space; `prim_remap` maps a slot to the deduped
 	// index in model->primitives.
@@ -289,6 +340,9 @@ namespace renderer {
 		mat4 world = parent_world * local_mat;
 
 		if (node->mesh) {
+			u32 object_index = model->object_count++;
+			model->objects[object_index] = { world, parse_physics(node) };
+
 			cgltf_size mesh_index = node->mesh - data->meshes;
 			u32 prim_base = prim_offset_per_mesh[mesh_index];
 			for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
@@ -321,7 +375,7 @@ namespace renderer {
 				GltfNode& gn = model->nodes[model->node_count++];
 				gn.primitive_index = prim_idx;
 				gn.material_index  = mat_idx;
-				gn.world_transform = world;
+				gn.object_index    = object_index;
 			}
 		}
 
@@ -528,6 +582,9 @@ namespace renderer {
 		u32 node_capacity = 16;
 		out->nodes = (GltfNode*)memory::malloc(sizeof(GltfNode) * node_capacity);
 		out->node_count = 0;
+		// every object is a node, so nodes_count bounds it
+		out->objects = (GltfObject*)memory::malloc(sizeof(GltfObject) * (data->nodes_count > 0 ? data->nodes_count : 1));
+		out->object_count = 0;
 
 		const cgltf_scene* scene = data->scene ? data->scene
 			: (data->scenes_count > 0 ? &data->scenes[0] : nullptr);
@@ -577,6 +634,7 @@ namespace renderer {
 		}
 		if (model->materials) memory::free(model->materials);
 		if (model->textures)  memory::free(model->textures);
+		if (model->objects)   memory::free(model->objects);
 		if (model->nodes)     memory::free(model->nodes);
 		*model = {};
 	}

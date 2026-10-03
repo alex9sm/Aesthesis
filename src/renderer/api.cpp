@@ -62,6 +62,7 @@ namespace renderer {
 		MeshHandle     mesh;
 		MaterialHandle material;
 		mat4           local_transform;
+		u32            object_index;
 	};
 
 	// a model exclusively owns the textures/materials/meshes it created
@@ -209,11 +210,15 @@ namespace renderer {
 		if (!load_gltf_model(path, &gm)) {
 			return INVALID_MODEL;
 		}
+		ModelHandle handle = load_model(gm);
+		free_gltf_model(&gm);
+		return handle;
+	}
 
+	ModelHandle load_model(const GltfModel& gm) {
 		ModelHandle slot = alloc_model_slot();
 		if (slot == INVALID_MODEL) {
 			logger::error("Out of model slots");
-			free_gltf_model(&gm);
 			return INVALID_MODEL;
 		}
 
@@ -294,10 +299,9 @@ namespace renderer {
 				matp = material_handles[gn.material_index];
 			}
 
-			mi.nodes[mi.node_count++] = { mh, matp, gn.world_transform };
+			mi.nodes[mi.node_count++] = { mh, matp, gm.objects[gn.object_index].world_transform, gn.object_index };
 		}
 
-		free_gltf_model(&gm);
 		return slot;
 	}
 
@@ -442,7 +446,9 @@ namespace renderer {
 		draw_queue[draw_count++] = { mesh, m, model, tint };
 	}
 
-	void submit_model(ModelHandle model, const mat4& transform, vec4 tint) {
+	void submit_model(ModelHandle model, const mat4& transform, vec4 tint,
+		const ObjectOverride* overrides, u32 override_count)
+	{
 		if (!frame_active) return;
 		if (model >= MAX_MODELS) return;
 		const ModelInternal& mi = models[model];
@@ -450,7 +456,11 @@ namespace renderer {
 
 		for (u32 i = 0; i < mi.node_count; i++) {
 			const ModelNode& n = mi.nodes[i];
-			submit_mesh(n.mesh, n.material, transform * n.local_transform, tint);
+			mat4 world = transform * n.local_transform;
+			for (u32 o = 0; o < override_count; o++) {
+				if (overrides[o].object_index == n.object_index) { world = overrides[o].world; break; }
+			}
+			submit_mesh(n.mesh, n.material, world, tint);
 		}
 	}
 
@@ -557,7 +567,7 @@ namespace renderer {
 		static vk::DrawBatch batches[vk::MAX_DRAWS_PER_FRAME];
 		u32 batch_count = build_batches(draw_queue, draw_count, sorted, batches);
 
-		vk::patch_globals_misc({ (f32)vk::light_count(), 0.0f, 0.0f, 0.0f });
+		vk::patch_globals_misc({ (f32)vk::light_count(), vk::environment_intensity(), 0.0f, 0.0f });
 		vk::patch_globals_spot_shadows(frame_spot_vp, spot_shadow_count);
 
 		vk::execute_shadow_pass(cmd, sun_on ? views : nullptr);

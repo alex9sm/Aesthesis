@@ -38,6 +38,7 @@ namespace vk {
 	static IblImage  brdf_lut          = {};
 	static IblImage  placeholder_irr   = {};
 	static IblImage  placeholder_pref  = {};
+	static IblImage  placeholder_sky   = {};
 	static VkSampler ibl_sampler       = VK_NULL_HANDLE;
 
 	// persistent irradiance bake compute pipeline (built once at init_ibl)
@@ -255,9 +256,9 @@ namespace vk {
 
 	// --- placeholder cubemaps ---
 
-	// Creates a 1×1×6 RGBA16F cubemap filled with `value` (RGB), alpha=1.
-	// Used as the neutral pre-set_environment default for irradiance + prefilter.
-	static bool create_placeholder_cube(IblImage* out, f32 value) {
+	// Creates a 1×1×6 RGBA16F cubemap filled with `value`, alpha=1.
+	// Used as the pre-set_environment default for irradiance, prefilter and sky.
+	static bool create_placeholder_cube(IblImage* out, vec3 value) {
 		Context& c = context();
 		VmaAllocator a = allocator();
 
@@ -284,9 +285,9 @@ namespace vk {
 
 		// upload one RGBA16F texel per face
 		u16 texel[4] = {
-			float_to_half(value),
-			float_to_half(value),
-			float_to_half(value),
+			float_to_half(value.x),
+			float_to_half(value.y),
+			float_to_half(value.z),
 			float_to_half(1.0f),
 		};
 		VkDeviceSize bytes_per_face = sizeof(texel);
@@ -357,59 +358,41 @@ namespace vk {
 	static void write_descriptors() {
 		Context& c = context();
 
-		// Pick irradiance + prefilter views from the active environment's slot,
-		// falling back to the neutral placeholders when nothing is set.
+		// Pick views from the active environment's slot, falling back to the
+		// placeholders when nothing is set.
 		VkImageView irr_view  = placeholder_irr.view;
 		VkImageView pref_view = placeholder_pref.view;
+		VkImageView sky_view  = placeholder_sky.view;
 		if (active_env != INVALID_CUBEMAP) {
 			const CubemapSlot* slot = get_cubemap(active_env);
 			if (slot && slot->ibl_baked) {
 				if (slot->irradiance_view) irr_view  = slot->irradiance_view;
 				if (slot->prefilter_view)  pref_view = slot->prefilter_view;
+				if (slot->source_view)     sky_view  = slot->source_view;
 			}
 		}
 
-		VkDescriptorImageInfo irr_i = {};
-		irr_i.sampler = ibl_sampler;
-		irr_i.imageView = irr_view;
-		irr_i.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		const u32 bindings[4] = { BIND_IRRADIANCE, BIND_PREFILTER, BIND_BRDF_LUT, BIND_SKY };
+		const VkImageView views[4] = { irr_view, pref_view, brdf_lut.view, sky_view };
 
-		VkDescriptorImageInfo pref_i = {};
-		pref_i.sampler = ibl_sampler;
-		pref_i.imageView = pref_view;
-		pref_i.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		VkDescriptorImageInfo lut_i = {};
-		lut_i.sampler = ibl_sampler;
-		lut_i.imageView = brdf_lut.view;
-		lut_i.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		VkDescriptorImageInfo infos[4] = {};
+		for (u32 i = 0; i < 4; i++) {
+			infos[i].sampler = ibl_sampler;
+			infos[i].imageView = views[i];
+			infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		}
 
 		for (u32 fi = 0; fi < FRAMES_IN_FLIGHT; fi++) {
-			VkWriteDescriptorSet writes[3] = {};
-			VkDescriptorSet dst = global_set_for_frame(fi);
-
-			writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet = dst;
-			writes[0].dstBinding = BIND_IRRADIANCE;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			writes[0].pImageInfo = &irr_i;
-
-			writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[1].dstSet = dst;
-			writes[1].dstBinding = BIND_PREFILTER;
-			writes[1].descriptorCount = 1;
-			writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			writes[1].pImageInfo = &pref_i;
-
-			writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[2].dstSet = dst;
-			writes[2].dstBinding = BIND_BRDF_LUT;
-			writes[2].descriptorCount = 1;
-			writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			writes[2].pImageInfo = &lut_i;
-
-			vkUpdateDescriptorSets(c.device, 3, writes, 0, nullptr);
+			VkWriteDescriptorSet writes[4] = {};
+			for (u32 i = 0; i < 4; i++) {
+				writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[i].dstSet = global_set_for_frame(fi);
+				writes[i].dstBinding = bindings[i];
+				writes[i].descriptorCount = 1;
+				writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				writes[i].pImageInfo = &infos[i];
+			}
+			vkUpdateDescriptorSets(c.device, 4, writes, 0, nullptr);
 		}
 	}
 
@@ -868,10 +851,11 @@ namespace vk {
 
 		if (!bake_brdf_lut()) return false;
 
-		// neutral mid-grey placeholders so set-0 bindings 4 & 5 always sample
-		// something well-defined before the first set_environment_cubemap call.
-		if (!create_placeholder_cube(&placeholder_irr,  0.5f)) return false;
-		if (!create_placeholder_cube(&placeholder_pref, 0.5f)) return false;
+		// placeholders so the IBL + sky bindings always sample something
+		// well-defined before the first set_environment_cubemap call.
+		if (!create_placeholder_cube(&placeholder_irr,  { 0.5f, 0.5f, 0.5f })) return false;
+		if (!create_placeholder_cube(&placeholder_pref, { 0.5f, 0.5f, 0.5f })) return false;
+		if (!create_placeholder_cube(&placeholder_sky,  { 0.05f, 0.07f, 0.10f })) return false;
 
 		if (!create_irradiance_pipeline()) return false;
 		if (!create_prefilter_pipeline()) return false;
@@ -895,6 +879,11 @@ namespace vk {
 
 	CubemapHandle active_environment() {
 		return active_env;
+	}
+
+	f32 environment_intensity() {
+		const CubemapSlot* slot = get_cubemap(active_env);
+		return slot ? slot->intensity : 1.0f;
 	}
 
 	static void destroy_ibl_image(IblImage& img) {
@@ -926,6 +915,7 @@ namespace vk {
 		destroy_ibl_image(brdf_lut);
 		destroy_ibl_image(placeholder_irr);
 		destroy_ibl_image(placeholder_pref);
+		destroy_ibl_image(placeholder_sky);
 
 		if (ibl_sampler) {
 			vkDestroySampler(c.device, ibl_sampler, nullptr);

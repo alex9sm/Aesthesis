@@ -431,6 +431,105 @@ inline mat4 mat4_inverse(mat4 m) {
     return r;
 }
 
+struct quat { f32 x, y, z, w; };
+
+inline quat quat_identity() { return { 0.0f, 0.0f, 0.0f, 1.0f }; }
+
+// axis must be normalized
+inline quat quat_axis_angle(vec3 axis, f32 angle) {
+    f32 s = math::sin(angle * 0.5f);
+    return { axis.x * s, axis.y * s, axis.z * s, math::cos(angle * 0.5f) };
+}
+
+inline quat operator*(quat a, quat b) {
+    return {
+        a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    };
+}
+
+inline quat quat_normalize(quat q) {
+    f32 inv = 1.0f / math::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+    return { q.x * inv, q.y * inv, q.z * inv, q.w * inv };
+}
+
+inline vec3 quat_rotate(quat q, vec3 v) {
+    vec3 u = { q.x, q.y, q.z };
+    vec3 t = 2.0f * cross(u, v);
+    return v + q.w * t + cross(u, t);
+}
+
+inline mat4 quat_to_mat4(quat q) {
+    f32 xx = q.x*q.x, yy = q.y*q.y, zz = q.z*q.z;
+    f32 xy = q.x*q.y, xz = q.x*q.z, yz = q.y*q.z;
+    f32 wx = q.w*q.x, wy = q.w*q.y, wz = q.w*q.z;
+
+    mat4 m = mat4_identity();
+    m.col[0][0] = 1.0f - 2.0f*(yy + zz);
+    m.col[0][1] = 2.0f*(xy + wz);
+    m.col[0][2] = 2.0f*(xz - wy);
+    m.col[1][0] = 2.0f*(xy - wz);
+    m.col[1][1] = 1.0f - 2.0f*(xx + zz);
+    m.col[1][2] = 2.0f*(yz + wx);
+    m.col[2][0] = 2.0f*(xz + wy);
+    m.col[2][1] = 2.0f*(yz - wx);
+    m.col[2][2] = 1.0f - 2.0f*(xx + yy);
+    return m;
+}
+
+// upper 3x3 of m must be a pure rotation
+inline quat quat_from_mat4(const mat4& m) {
+    f32 trace = m.col[0][0] + m.col[1][1] + m.col[2][2];
+    quat q;
+    if (trace > 0.0f) {
+        f32 s = math::sqrt(trace + 1.0f) * 2.0f;
+        q = { (m.col[1][2] - m.col[2][1]) / s, (m.col[2][0] - m.col[0][2]) / s,
+              (m.col[0][1] - m.col[1][0]) / s, 0.25f * s };
+    } else if (m.col[0][0] > m.col[1][1] && m.col[0][0] > m.col[2][2]) {
+        f32 s = math::sqrt(1.0f + m.col[0][0] - m.col[1][1] - m.col[2][2]) * 2.0f;
+        q = { 0.25f * s, (m.col[1][0] + m.col[0][1]) / s,
+              (m.col[2][0] + m.col[0][2]) / s, (m.col[1][2] - m.col[2][1]) / s };
+    } else if (m.col[1][1] > m.col[2][2]) {
+        f32 s = math::sqrt(1.0f + m.col[1][1] - m.col[0][0] - m.col[2][2]) * 2.0f;
+        q = { (m.col[1][0] + m.col[0][1]) / s, 0.25f * s,
+              (m.col[2][1] + m.col[1][2]) / s, (m.col[2][0] - m.col[0][2]) / s };
+    } else {
+        f32 s = math::sqrt(1.0f + m.col[2][2] - m.col[0][0] - m.col[1][1]) * 2.0f;
+        q = { (m.col[2][0] + m.col[0][2]) / s, (m.col[2][1] + m.col[1][2]) / s,
+              0.25f * s, (m.col[0][1] - m.col[1][0]) / s };
+    }
+    return quat_normalize(q);
+}
+
+// TRS decomposition; shear is lost, a mirrored matrix gets negative scale.x
+inline void mat4_decompose(const mat4& m, vec3* pos, quat* rot, vec3* scale) {
+    vec3 c0 = { m.col[0][0], m.col[0][1], m.col[0][2] };
+    vec3 c1 = { m.col[1][0], m.col[1][1], m.col[1][2] };
+    vec3 c2 = { m.col[2][0], m.col[2][1], m.col[2][2] };
+    vec3 s = { length(c0), length(c1), length(c2) };
+    if (dot(cross(c0, c1), c2) < 0.0f) s.x = -s.x;
+
+    mat4 r = mat4_identity();
+    for (int i = 0; i < 3; i++) {
+        r.col[0][i] = m.col[0][i] / s.x;
+        r.col[1][i] = m.col[1][i] / s.y;
+        r.col[2][i] = m.col[2][i] / s.z;
+    }
+    *pos   = { m.col[3][0], m.col[3][1], m.col[3][2] };
+    *rot   = quat_from_mat4(r);
+    *scale = s;
+}
+
+inline mat4 mat4_from_pos_rot(vec3 pos, quat rot) {
+    mat4 m = quat_to_mat4(rot);
+    m.col[3][0] = pos.x;
+    m.col[3][1] = pos.y;
+    m.col[3][2] = pos.z;
+    return m;
+}
+
 constexpr f32 PI = 3.14159265358979323846f;
 constexpr f32 TAU = 6.28318530717958647692f;
 

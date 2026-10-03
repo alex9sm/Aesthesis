@@ -55,7 +55,7 @@ namespace vk {
 		bindings[BIND_LIGHTS].descriptorCount = 1;
 		bindings[BIND_LIGHTS].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		for (u32 b = BIND_SHADOW; b <= BIND_SPOT_SHADOW; b++) {
+		for (u32 b = BIND_SHADOW; b <= BIND_SKY; b++) {
 			bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			bindings[b].descriptorCount = 1;
 			bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -94,9 +94,9 @@ namespace vk {
 		// bindings 1 (instance SSBO), 2 (material SSBO) and 7 (lights SSBO).
 		sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		sizes[1].descriptorCount = 3 * FRAMES_IN_FLIGHT;
-		// BIND_TEXTURES + BIND_IRRADIANCE/PREFILTER/BRDF_LUT + BIND_SHADOW/SPOT_SHADOW
+		// BIND_TEXTURES + BIND_IRRADIANCE/PREFILTER/BRDF_LUT + BIND_SHADOW/SPOT_SHADOW/SKY
 		sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		sizes[2].descriptorCount = (MAX_TEXTURES + 5) * FRAMES_IN_FLIGHT;
+		sizes[2].descriptorCount = (MAX_TEXTURES + 6) * FRAMES_IN_FLIGHT;
 
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

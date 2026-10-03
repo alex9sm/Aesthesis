@@ -65,8 +65,17 @@ namespace renderer {
 	void unload_material(MaterialHandle handle);
 	MaterialHandle default_material();
 
+	struct GltfModel;
+
 	ModelHandle load_model(const char* path);
+	ModelHandle load_model(const GltfModel& model);   // caller keeps ownership (e.g. to build physics bodies)
 	void unload_model(ModelHandle handle);
+
+	// draws one object of a model at an absolute world transform (e.g. a dynamic body)
+	struct ObjectOverride {
+		u32  object_index;
+		mat4 world;
+	};
 
 	// Loads 6 PNG faces from assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png
 	CubemapHandle load_cubemap(const char* name, f32 intensity = 1.0f);
@@ -92,7 +101,8 @@ namespace renderer {
 	void submit_mesh(MeshHandle mesh, MaterialHandle material,
 		const mat4& model, vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
 	void submit_model(ModelHandle model, const mat4& transform = mat4_identity(),
-		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
+		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f },
+		const ObjectOverride* overrides = nullptr, u32 override_count = 0);
 	void end_frame();
 
 	// fonts — bakes an SDF atlas from a TTF and uploads it as a texture

@@ -53,15 +53,12 @@ namespace camera {
 		platform::set_cursor_visible(true);
 	}
 
-	void update(Camera* c, f32 dt) {
-		// look: hold RMB to engage capture; release to free the cursor.
-		if (platform::mouse_pressed(platform::MOUSE_RIGHT)) {
-			engage_capture(c);
-		}
-		if (platform::mouse_released(platform::MOUSE_RIGHT)) {
-			release_capture(c);
-		}
+	void set_captured(Camera* c, bool captured) {
+		if (captured) engage_capture(c);
+		else          release_capture(c);
+	}
 
+	void look(Camera* c) {
 		if (c->captured) {
 			i32 cx = platform::window_width()  / 2;
 			i32 cy = platform::window_height() / 2;
@@ -75,6 +72,17 @@ namespace camera {
 				platform::set_mouse_pos(cx, cy);
 			}
 		}
+	}
+
+	void update(Camera* c, f32 dt) {
+		// look: hold RMB to engage capture; release to free the cursor.
+		if (platform::mouse_pressed(platform::MOUSE_RIGHT)) {
+			engage_capture(c);
+		}
+		if (platform::mouse_released(platform::MOUSE_RIGHT)) {
+			release_capture(c);
+		}
+		look(c);
 
 		// movement: always active.
 		f32 speed = c->move_speed;

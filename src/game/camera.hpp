@@ -19,7 +19,9 @@ struct Camera {
 namespace camera {
 
 	void init(Camera* c);
-	void update(Camera* c, f32 dt);
+	void update(Camera* c, f32 dt);        // freecam: RMB look + fly
+	void look(Camera* c);                  // mouse look only, while captured
+	void set_captured(Camera* c, bool captured);
 
 	mat4 view(const Camera& c);
 	mat4 projection(const Camera& c, f32 aspect);

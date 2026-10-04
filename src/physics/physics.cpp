@@ -326,15 +326,24 @@ namespace physics {
 		if (character < MAX_CHARACTERS) characters[character] = nullptr;
 	}
 
-	void move_character(CharacterHandle character, vec3 velocity, f32 dt) {
+	vec3 move_character(CharacterHandle character, vec3 velocity, f32 dt) {
 		JPH::CharacterVirtual* ch = get_character(character);
-		if (!ch) return;
+		if (!ch) return velocity;
 		ch->SetLinearVelocity(to_jph(velocity));
 		JPH::CharacterVirtual::ExtendedUpdateSettings settings;
 		ch->ExtendedUpdate(dt, phys_system->GetGravity(), settings,
 			phys_system->GetDefaultBroadPhaseLayerFilter(layers::MOVING),
 			phys_system->GetDefaultLayerFilter(layers::MOVING),
 			JPH::BodyFilter(), JPH::ShapeFilter(), *temp_allocator);
+
+		// Jolt doesn't write the slid velocity back; clip against walls/ceilings (floors left to the caller)
+		JPH::Vec3 v = to_jph(velocity);
+		for (const JPH::CharacterVirtual::Contact& c : ch->GetActiveContacts()) {
+			if (!c.mHadCollision || c.mWasDiscarded || !ch->IsSlopeTooSteep(c.mContactNormal)) continue;
+			f32 into = v.Dot(c.mContactNormal);
+			if (into < 0.0f) v -= c.mContactNormal * into;
+		}
+		return from_jph(v);
 	}
 
 	CharacterState character_state(CharacterHandle character) {

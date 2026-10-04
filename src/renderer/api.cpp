@@ -154,8 +154,8 @@ namespace renderer {
 
 	// --- textures ---
 
-	TextureHandle load_texture(const char* path) {
-		return vk::load_texture(path);
+	TextureHandle load_texture(const char* path, bool srgb) {
+		return vk::load_texture(path, srgb);
 	}
 
 	void unload_texture(TextureHandle handle) {
@@ -191,6 +191,7 @@ namespace renderer {
 		g.base_color_factor = desc.base_color_factor;
 		g.metallic_factor   = desc.metallic_factor;
 		g.roughness_factor  = desc.roughness_factor;
+		g.normal_scale      = desc.normal_scale;
 		return vk::create_material(g);
 	}
 
@@ -232,7 +233,7 @@ namespace renderer {
 		if (gm.texture_count > 0) {
 			texture_handles = (TextureHandle*)memory::malloc(sizeof(TextureHandle) * gm.texture_count);
 			for (u32 i = 0; i < gm.texture_count; i++) {
-				texture_handles[i] = load_texture(gm.textures[i].path);
+				texture_handles[i] = load_texture(gm.textures[i].path, gm.textures[i].srgb);
 				if (texture_handles[i] == INVALID_TEXTURE) {
 					texture_handles[i] = DEFAULT_ALBEDO;
 				}
@@ -252,6 +253,7 @@ namespace renderer {
 				desc.base_color_factor = src.base_color_factor;
 				desc.metallic_factor   = src.metallic_factor;
 				desc.roughness_factor  = src.roughness_factor;
+				desc.normal_scale      = src.normal_scale;
 				material_handles[i] = create_material(desc);
 				if (material_handles[i] == INVALID_MATERIAL) {
 					material_handles[i] = DEFAULT_MATERIAL_HANDLE;

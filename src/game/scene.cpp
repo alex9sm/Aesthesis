@@ -83,10 +83,12 @@ namespace scene {
 
 		renderer::submit_spot_light({ -14.0f, 6.0f, 2.0f }, { 1.0f, 0.8f, 0.55f }, 14.0f, 1000.0f,
 			0.1f, { 0.0f, -1.0f, 0.0f }, 5.0f, 40.0f, true);
-		renderer::submit_spot_light({ -14.0f, 2.0f, 8.0f }, { 1.0f, 0.8f, 0.55f }, 100.0f, 1000.0f,
+		renderer::submit_spot_light({ -14.0f, 2.0f, 8.0f }, { 1.0f, 0.8f, 0.55f }, 20.0f, 1000.0f,
 			0.1f, { 1.0f, -0.6f, 0.6f }, 5.0f, 60.0f, true);
-		renderer::submit_spot_light({ 12.0f, 12.0f, -6.0f }, { 1.0f, 0.8f, 0.55f }, 100.0f, 1000.0f,
+		renderer::submit_spot_light({ 12.0f, 12.0f, -6.0f }, { 1.0f, 0.8f, 0.55f }, 20.0f, 1000.0f,
 			0.1f, { 0.0f, -1.0f, 0.0f }, 5.0f, 60.0f, true);
+		renderer::submit_spot_light({ 12.0f, 5.0f, -17.0f }, { 1.0f, 0.8f, 0.55f }, 30.0f, 1000.0f,
+			0.1f, { 0.0f, -1.0f, 0.0f }, 5.0f, 60.0f, false);
 
 
 		// --- FPS HUD ---

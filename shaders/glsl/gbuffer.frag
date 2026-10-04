@@ -17,7 +17,7 @@ layout(location = 2) out vec2 out_material;  // RG8 UNORM: metallic, roughness
 
 struct Material {
     vec4 base_color_factor;
-    vec4 mr_factors;     // .x=metallic, .y=roughness, .zw unused
+    vec4 mr_factors;     // .x=metallic, .y=roughness, .z=normal scale, .w unused
     uint albedo_idx;
     uint normal_idx;
     uint orm_idx;
@@ -49,6 +49,7 @@ void main() {
     vec3 world_n = N;
     if (m.normal_idx != SHARED_TEX_DEFAULT_NORMAL) {
         vec3 n_tex = texture(u_textures[nonuniformEXT(m.normal_idx)], v_uv).xyz * 2.0 - 1.0;
+        n_tex.xy *= m.mr_factors.z;
         // Gram-Schmidt re-orthogonalize the interpolated tangent to the normal.
         vec3 T = normalize(v_tangent_ws - dot(v_tangent_ws, N) * N);
         vec3 B = cross(N, T) * v_tangent_sign;

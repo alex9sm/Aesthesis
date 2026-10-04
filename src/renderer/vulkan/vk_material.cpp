@@ -75,7 +75,7 @@ namespace vk {
 	static void write_slot(MaterialHandle slot, const MaterialDescGPU& desc) {
 		MaterialGPU* dst = &material_mapped[slot];
 		dst->base_color_factor = desc.base_color_factor;
-		dst->mr_factors = { desc.metallic_factor, desc.roughness_factor, 0.0f, 0.0f };
+		dst->mr_factors = { desc.metallic_factor, desc.roughness_factor, desc.normal_scale, 0.0f };
 		dst->albedo_idx = desc.albedo_idx;
 		dst->normal_idx = desc.normal_idx;
 		dst->orm_idx    = desc.orm_idx;
@@ -98,6 +98,7 @@ namespace vk {
 		def.base_color_factor = { 0.5f, 0.5f, 0.5f, 1.0f };
 		def.metallic_factor   = 0.0f;
 		def.roughness_factor  = 1.0f;
+		def.normal_scale      = 1.0f;
 		write_slot(DEFAULT_MATERIAL, def);
 		slot_used[DEFAULT_MATERIAL] = true;
 

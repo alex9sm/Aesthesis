@@ -24,11 +24,11 @@ namespace vk {
 	// loads an RGBA8 image from disk (jpg/png/etc via stb_image). returns
 	// INVALID_TEXTURE on failure. caller owns the returned handle and must
 	// eventually call unload_texture.
-	TextureHandle load_texture(const char* path);
+	TextureHandle load_texture(const char* path, bool srgb = false);
 
 	// loads from raw RGBA8 pixel data. exposed mainly for procedural/reserved
 	// textures (the engine itself uses this for the default slots).
-	TextureHandle load_texture_pixels(const u8* rgba, u32 width, u32 height);
+	TextureHandle load_texture_pixels(const u8* rgba, u32 width, u32 height, bool srgb = false);
 
 	void unload_texture(TextureHandle handle);
 

@@ -18,7 +18,7 @@ namespace vk {
 	// must match std430 layout in gbuffer shaders.
 	struct MaterialGPU {
 		vec4 base_color_factor;
-		vec4 mr_factors;     // .x = metallic, .y = roughness, .zw unused
+		vec4 mr_factors;     // .x = metallic, .y = roughness, .z = normal scale, .w unused
 		u32  albedo_idx;
 		u32  normal_idx;
 		u32  orm_idx;
@@ -35,6 +35,7 @@ namespace vk {
 		vec4 base_color_factor;
 		f32  metallic_factor;
 		f32  roughness_factor;
+		f32  normal_scale;
 	};
 
 	bool init_materials();

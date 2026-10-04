@@ -49,6 +49,7 @@ namespace renderer {
 		vec4          base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		f32           metallic_factor   = 1.0f;
 		f32           roughness_factor  = 1.0f;
+		f32           normal_scale      = 1.0f;
 	};
 
 	bool init();
@@ -58,7 +59,7 @@ namespace renderer {
 	MeshHandle load_mesh(const char* path);
 	void unload_mesh(MeshHandle handle);
 
-	TextureHandle load_texture(const char* path);
+	TextureHandle load_texture(const char* path, bool srgb = false);
 	void unload_texture(TextureHandle handle);
 
 	MaterialHandle create_material(const MaterialDesc& desc);

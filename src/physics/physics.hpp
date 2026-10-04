@@ -67,8 +67,9 @@ namespace physics {
 
 	CharacterHandle create_character(vec3 feet, f32 radius, f32 height);
 	void            destroy_character(CharacterHandle character);
-	// moves by velocity * dt with collide-and-slide, stair step-up and stick-to-floor
-	void            move_character(CharacterHandle character, vec3 velocity, f32 dt);
+	// moves by velocity * dt with collide-and-slide, stair step-up and stick-to-floor.
+	// returns velocity with the into-surface part removed for walls and ceilings
+	vec3            move_character(CharacterHandle character, vec3 velocity, f32 dt);
 	CharacterState  character_state(CharacterHandle character);
 	void            set_character_position(CharacterHandle character, vec3 feet);
 

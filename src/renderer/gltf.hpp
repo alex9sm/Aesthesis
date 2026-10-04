@@ -45,6 +45,7 @@ namespace renderer {
 		vec4 base_color_factor;
 		f32  metallic_factor;
 		f32  roughness_factor;
+		f32  normal_scale;
 		u32  albedo_index;
 		u32  normal_index;
 		u32  orm_index;
@@ -54,6 +55,7 @@ namespace renderer {
 	// "assets/models/foo/albedo.jpg".
 	struct GltfTexturePath {
 		char path[512];
+		bool srgb;   // colour data (base colour); everything else is linear
 	};
 
 	// physics flags from the Blender object's custom properties (glTF node extras).

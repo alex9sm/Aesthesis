@@ -468,10 +468,13 @@ namespace renderer {
 		out->texture_count = 0;
 		const cgltf_image** image_keys = (const cgltf_image**)memory::malloc(sizeof(const cgltf_image*) * tex_capacity);
 
-		auto add_texture = [&](const cgltf_image* image) -> u32 {
+		auto add_texture = [&](const cgltf_image* image, bool srgb) -> u32 {
 			if (!image || !image->uri) return (u32)~0u;
 			for (u32 i = 0; i < out->texture_count; i++) {
-				if (image_keys[i] == image) return i;
+				if (image_keys[i] == image) {
+					out->textures[i].srgb |= srgb;
+					return i;
+				}
 			}
 			if (out->texture_count >= tex_capacity) {
 				u32 new_cap = tex_capacity * 2;
@@ -487,6 +490,7 @@ namespace renderer {
 			}
 			u32 idx = out->texture_count++;
 			image_keys[idx] = image;
+			out->textures[idx].srgb = srgb;
 			resolve_uri(base_dir, image->uri, out->textures[idx].path,
 				sizeof(out->textures[idx].path));
 			return idx;
@@ -511,6 +515,7 @@ namespace renderer {
 				gm.base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
 				gm.metallic_factor   = 1.0f;
 				gm.roughness_factor  = 1.0f;
+				gm.normal_scale      = 1.0f;
 				gm.albedo_index = (u32)~0u;
 				gm.normal_index = (u32)~0u;
 				gm.orm_index    = (u32)~0u;
@@ -527,16 +532,17 @@ namespace renderer {
 					gm.roughness_factor = pbr.roughness_factor;
 
 					if (pbr.base_color_texture.texture && pbr.base_color_texture.texture->image) {
-						gm.albedo_index = add_texture(pbr.base_color_texture.texture->image);
+						gm.albedo_index = add_texture(pbr.base_color_texture.texture->image, true);
 					}
 					// metallic_roughness is treated as the ORM texture by convention.
 					if (pbr.metallic_roughness_texture.texture && pbr.metallic_roughness_texture.texture->image) {
-						gm.orm_index = add_texture(pbr.metallic_roughness_texture.texture->image);
+						gm.orm_index = add_texture(pbr.metallic_roughness_texture.texture->image, false);
 					}
 				}
 
 				if (cm->normal_texture.texture && cm->normal_texture.texture->image) {
-					gm.normal_index = add_texture(cm->normal_texture.texture->image);
+					gm.normal_index = add_texture(cm->normal_texture.texture->image, false);
+					gm.normal_scale = cm->normal_texture.scale;
 				}
 
 				// occlusion: ignored unless it points at the same image as MR

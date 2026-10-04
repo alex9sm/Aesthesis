@@ -97,7 +97,8 @@ namespace vk {
 	}
 
 	// staging upload + image creation + mip chain generation via vkCmdBlitImage.
-	static bool upload_image(const u8* rgba, u32 width, u32 height, TextureGPU* out) {
+	static bool upload_image(const u8* rgba, u32 width, u32 height, bool srgb, TextureGPU* out) {
+		VkFormat format = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 		Context& c = context();
 		VmaAllocator a = allocator();
 
@@ -108,7 +109,7 @@ namespace vk {
 		VkImageCreateInfo img_ci = {};
 		img_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		img_ci.imageType = VK_IMAGE_TYPE_2D;
-		img_ci.format = VK_FORMAT_R8G8B8A8_UNORM;
+		img_ci.format = format;
 		img_ci.extent = { width, height, 1 };
 		img_ci.mipLevels = mip_levels;
 		img_ci.arrayLayers = 1;
@@ -236,7 +237,7 @@ namespace vk {
 		view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		view_ci.image = out->image;
 		view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view_ci.format = VK_FORMAT_R8G8B8A8_UNORM;
+		view_ci.format = format;
 		view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		view_ci.subresourceRange.baseMipLevel = 0;
 		view_ci.subresourceRange.levelCount = mip_levels;
@@ -257,8 +258,8 @@ namespace vk {
 		return true;
 	}
 
-	static TextureHandle create_in_slot(TextureHandle slot, const u8* rgba, u32 w, u32 h) {
-		if (!upload_image(rgba, w, h, &textures[slot])) {
+	static TextureHandle create_in_slot(TextureHandle slot, const u8* rgba, u32 w, u32 h, bool srgb = false) {
+		if (!upload_image(rgba, w, h, srgb, &textures[slot])) {
 			return INVALID_TEXTURE;
 		}
 		write_descriptor(slot);
@@ -308,26 +309,26 @@ namespace vk {
 
 	// --- public ---
 
-	TextureHandle load_texture(const char* path) {
+	TextureHandle load_texture(const char* path, bool srgb) {
 		int w = 0, h = 0, ch = 0;
 		stbi_uc* data = stbi_load(path, &w, &h, &ch, 4);
 		if (!data) {
 			logger::error("stbi_load failed: %s", path);
 			return INVALID_TEXTURE;
 		}
-		TextureHandle handle = load_texture_pixels(data, (u32)w, (u32)h);
+		TextureHandle handle = load_texture_pixels(data, (u32)w, (u32)h, srgb);
 		stbi_image_free(data);
 		return handle;
 	}
 
-	TextureHandle load_texture_pixels(const u8* rgba, u32 width, u32 height) {
+	TextureHandle load_texture_pixels(const u8* rgba, u32 width, u32 height, bool srgb) {
 		if (!rgba || width == 0 || height == 0) return INVALID_TEXTURE;
 		TextureHandle slot = find_free_slot();
 		if (slot == INVALID_TEXTURE) {
 			logger::error("Out of texture slots");
 			return INVALID_TEXTURE;
 		}
-		return create_in_slot(slot, rgba, width, height);
+		return create_in_slot(slot, rgba, width, height, srgb);
 	}
 
 	void unload_texture(TextureHandle handle) {

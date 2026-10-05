@@ -318,6 +318,40 @@ namespace renderer {
 		return ph;
 	}
 
+	// the exporter's Standard lighting mode multiplies Blender's W and W/m² by this
+	static constexpr f32 WATTS_TO_LUMENS = 683.0f;
+	// irradiance (Blender units) at which an unauthored range cuts off
+	static constexpr f32 LIGHT_CUTOFF = 0.25f;
+
+	static GltfLight parse_light(const cgltf_node* node, const mat4& world) {
+		const cgltf_light* cl = node->light;
+		GltfLight l = {};
+		l.type = cl->type == cgltf_light_type_directional ? LightType::Sun
+			: cl->type == cgltf_light_type_spot ? LightType::Spot : LightType::Point;
+		l.position  = { world.col[3][0], world.col[3][1], world.col[3][2] };
+		l.direction = normalize(vec3{ -world.col[2][0], -world.col[2][1], -world.col[2][2] });
+		l.color     = { cl->color[0], cl->color[1], cl->color[2] };
+		l.intensity = cl->intensity / WATTS_TO_LUMENS;
+		l.range     = cl->range;
+		l.radius    = 0.05f;
+		l.inner_deg = to_degrees(cl->spot_inner_cone_angle);
+		l.outer_deg = to_degrees(cl->spot_outer_cone_angle);
+
+		const char* json = node->extras.data;
+		char v[32];
+		if (json) {
+			if (extras_value(json, "range", v, sizeof(v)))  l.range  = (f32)atof(v);
+			if (extras_value(json, "radius", v, sizeof(v))) l.radius = (f32)atof(v);
+			if (extras_value(json, "shadow", v, sizeof(v))) l.casts_shadow = str::equal(v, "true") || str::equal(v, "1");
+		}
+		if (l.casts_shadow && l.type == LightType::Point) {
+			logger::warn("glTF light '%s': point lights don't cast shadows", node->name ? node->name : "<unnamed>");
+			l.casts_shadow = false;
+		}
+		if (l.range <= 0.0f) l.range = math::sqrt(l.intensity / LIGHT_CUTOFF);
+		return l;
+	}
+
 	// `prim_offset_per_mesh[i]` gives cgltf mesh i's first slot in the flat
 	// (mesh, primitive) slot space; `prim_remap` maps a slot to the deduped
 	// index in model->primitives.
@@ -378,6 +412,8 @@ namespace renderer {
 				gn.object_index    = object_index;
 			}
 		}
+
+		if (node->light) model->lights[model->light_count++] = parse_light(node, world);
 
 		for (cgltf_size i = 0; i < node->children_count; i++) {
 			walk_node(model, node_capacity, data, node->children[i], world,
@@ -513,7 +549,7 @@ namespace renderer {
 				const cgltf_material* cm = &data->materials[m];
 				GltfMaterial& gm = out->materials[out->material_count];
 				gm.base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
-				gm.metallic_factor   = 1.0f;
+				gm.metallic_factor   = 0.0f;   // overwritten by the PBR block; 0 avoids chrome for non-PBR materials
 				gm.roughness_factor  = 1.0f;
 				gm.normal_scale      = 1.0f;
 				gm.albedo_index = (u32)~0u;
@@ -591,6 +627,8 @@ namespace renderer {
 		// every object is a node, so nodes_count bounds it
 		out->objects = (GltfObject*)memory::malloc(sizeof(GltfObject) * (data->nodes_count > 0 ? data->nodes_count : 1));
 		out->object_count = 0;
+		out->lights = (GltfLight*)memory::malloc(sizeof(GltfLight) * (data->nodes_count > 0 ? data->nodes_count : 1));
+		out->light_count = 0;
 
 		const cgltf_scene* scene = data->scene ? data->scene
 			: (data->scenes_count > 0 ? &data->scenes[0] : nullptr);
@@ -623,9 +661,9 @@ namespace renderer {
 		if (mat_keys) memory::free((void*)mat_keys);
 		if (mat_index_for_cgltf_mat) memory::free(mat_index_for_cgltf_mat);
 
-		logger::info("Loaded glTF model '%s' (%u/%u prims after dedup, %u materials, %u textures, %u nodes)",
+		logger::info("Loaded glTF model '%s' (%u/%u prims after dedup, %u materials, %u textures, %u nodes, %u lights)",
 			path, out->primitive_count, total_prims,
-			out->material_count, out->texture_count, out->node_count);
+			out->material_count, out->texture_count, out->node_count, out->light_count);
 
 		cgltf_free(data);
 		return true;
@@ -642,6 +680,7 @@ namespace renderer {
 		if (model->textures)  memory::free(model->textures);
 		if (model->objects)   memory::free(model->objects);
 		if (model->nodes)     memory::free(model->nodes);
+		if (model->lights)    memory::free(model->lights);
 		*model = {};
 	}
 

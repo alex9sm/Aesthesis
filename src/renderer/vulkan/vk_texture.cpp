@@ -277,8 +277,8 @@ namespace vk {
 		u8 flat_normal[4] = { 0x80, 0x80, 0xFF, 0xFF };
 		if (create_in_slot(TEX_DEFAULT_NORMAL, flat_normal, 1, 1) == INVALID_TEXTURE) return false;
 
-		// slot 2: 1x1 ORM neutral: AO=1 in R, roughness=1 in G, metallic=0 in B
-		u8 orm[4] = { 0xFF, 0xFF, 0x00, 0xFF };
+		// slot 2: 1x1 ORM neutral (all 1) so the material's metallic/roughness factors pass through
+		u8 orm[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
 		if (create_in_slot(TEX_DEFAULT_ORM, orm, 1, 1) == INVALID_TEXTURE) return false;
 
 		return true;

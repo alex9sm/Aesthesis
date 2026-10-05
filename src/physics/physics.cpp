@@ -338,7 +338,7 @@ namespace physics {
 
 		// Jolt doesn't write the slid velocity back; clip against walls/ceilings (floors left to the caller)
 		JPH::Vec3 v = to_jph(velocity);
-		for (const JPH::CharacterVirtual::Contact& c : ch->GetActiveContacts()) {
+		for (const JPH::CharacterContact& c : ch->GetActiveContacts()) {
 			if (!c.mHadCollision || c.mWasDiscarded || !ch->IsSlopeTooSteep(c.mContactNormal)) continue;
 			f32 into = v.Dot(c.mContactNormal);
 			if (into < 0.0f) v -= c.mContactNormal * into;

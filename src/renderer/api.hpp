@@ -47,7 +47,7 @@ namespace renderer {
 		TextureHandle normal            = DEFAULT_NORMAL;
 		TextureHandle orm               = DEFAULT_ORM;
 		vec4          base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
-		f32           metallic_factor   = 1.0f;
+		f32           metallic_factor   = 0.0f;
 		f32           roughness_factor  = 1.0f;
 		f32           normal_scale      = 1.0f;
 	};

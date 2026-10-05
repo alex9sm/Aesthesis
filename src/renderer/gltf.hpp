@@ -82,6 +82,24 @@ namespace renderer {
 		u32 object_index;
 	};
 
+	// KHR_lights_punctual + the light object's custom properties (range, radius, shadow).
+	// intensity is in Blender's render units (exporter's Standard mode ×683 undone):
+	// point/spot = W / 4π, sun = W/m². range is always filled (derived when not authored).
+	enum class LightType : u8 { Point, Spot, Sun };
+
+	struct GltfLight {
+		LightType type;
+		vec3      position;
+		vec3      direction;   // world-space shine direction (node −Z)
+		vec3      color;
+		f32       intensity;
+		f32       range;
+		f32       radius;
+		f32       inner_deg;
+		f32       outer_deg;
+		bool      casts_shadow;
+	};
+
 	struct GltfModel {
 		GltfPrimitive*    primitives;
 		u32               primitive_count;
@@ -93,6 +111,8 @@ namespace renderer {
 		u32               object_count;
 		GltfNode*         nodes;
 		u32               node_count;
+		GltfLight*        lights;
+		u32               light_count;
 	};
 
 	bool load_gltf_model(const char* path, GltfModel* out);

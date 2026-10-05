@@ -18,6 +18,10 @@ namespace scene {
 	static physics::ObjectBody room_bodies[MAX_ROOM_BODIES];
 	static u32                 room_body_count = 0;
 
+	static constexpr u32 MAX_ROOM_LIGHTS = 256;
+	static renderer::GltfLight room_lights[MAX_ROOM_LIGHTS];
+	static u32                 room_light_count = 0;
+
 	// FPS smoothing — accumulate frames over a one-second window, then publish.
 	static f32  fps_accum_time    = 0.0f;
 	static u32  fps_accum_frames  = 0;
@@ -30,14 +34,20 @@ namespace scene {
 		helmet = renderer::load_model("assets/models/damagedhelmet/DamagedHelmet.gltf");
 		//chess = renderer::load_model("assets/models/chess/chess.gltf");
 
+		renderer::set_sun({ 0.38f, 1.0f, 0.41f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
+
 		renderer::GltfModel room_gltf = {};
 		if (renderer::load_gltf_model("assets/models/testroom/testingroom.gltf", &room_gltf)) {
 			room = renderer::load_model(room_gltf);
 			room_body_count = physics::create_bodies(room_gltf, mat4_identity(), room_bodies, MAX_ROOM_BODIES);
+			for (u32 i = 0; i < room_gltf.light_count && room_light_count < MAX_ROOM_LIGHTS; i++) {
+				const renderer::GltfLight& l = room_gltf.lights[i];
+				if (l.type == renderer::LightType::Sun) renderer::set_sun(-l.direction, l.color, l.intensity);
+				else room_lights[room_light_count++] = l;
+			}
 			renderer::free_gltf_model(&room_gltf);
 		}
 
-		renderer::set_sun({ 0.38f, 1.0f, 0.41f }, { 1.0f, 1.0f, 1.0f }, 0.0f);
 		env_cubemap = renderer::load_cubemap("night", 1.0f);
 		renderer::set_environment_cubemap(env_cubemap);
 
@@ -51,6 +61,7 @@ namespace scene {
 	void shutdown() {
 		for (u32 i = 0; i < room_body_count; i++) physics::destroy_body(room_bodies[i].body);
 		room_body_count = 0;
+		room_light_count = 0;
 		renderer::unload_font(hud_font);
 		renderer::clear_environment_cubemap();
 		renderer::unload_cubemap(env_cubemap);
@@ -76,20 +87,15 @@ namespace scene {
 		}
 		renderer::submit_model(room, mat4_identity(), { 1.0f, 1.0f, 1.0f, 1.0f }, room_overrides, room_override_count);
 
-		// test point lights
-		// renderer::submit_point_light({ 2.0f, 2.0f, 1.0f },  { 1.0f, 0.3f, 0.1f }, 10.0f, 1000.0f);
-		// renderer::submit_point_light({-4.0f, 4.0f, 0.0f },  { 0.1f, 0.3f, 1.0f }, 10.0f, 1000.0f);
-		// renderer::submit_point_light({ 0.0f, 5.0f, 8.0f },  { 0.2f, 1.0f, 0.2f }, 10.0f, 1000.0f);
-
-		renderer::submit_spot_light({ -14.0f, 6.0f, 2.0f }, { 1.0f, 0.8f, 0.55f }, 14.0f, 1000.0f,
-			0.1f, { 0.0f, -1.0f, 0.0f }, 5.0f, 40.0f, true);
-		renderer::submit_spot_light({ -14.0f, 2.0f, 8.0f }, { 1.0f, 0.8f, 0.55f }, 20.0f, 1000.0f,
-			0.1f, { 1.0f, -0.6f, 0.6f }, 5.0f, 60.0f, true);
-		renderer::submit_spot_light({ 12.0f, 12.0f, -6.0f }, { 1.0f, 0.8f, 0.55f }, 20.0f, 1000.0f,
-			0.1f, { 0.0f, -1.0f, 0.0f }, 5.0f, 60.0f, true);
-		renderer::submit_spot_light({ 12.0f, 5.0f, -17.0f }, { 1.0f, 0.8f, 0.55f }, 30.0f, 1000.0f,
-			0.1f, { 0.0f, -1.0f, 0.0f }, 5.0f, 60.0f, false);
-
+		for (u32 i = 0; i < room_light_count; i++) {
+			const renderer::GltfLight& l = room_lights[i];
+			if (l.type == renderer::LightType::Point) {
+				renderer::submit_point_light(l.position, l.color, l.range, l.intensity, l.radius);
+			} else {
+				renderer::submit_spot_light(l.position, l.color, l.range, l.intensity, l.radius,
+					l.direction, l.inner_deg, l.outer_deg, l.casts_shadow);
+			}
+		}
 
 		// --- FPS HUD ---
 		fps_accum_time   += dt;

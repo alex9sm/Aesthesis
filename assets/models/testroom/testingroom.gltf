@@ -4,11 +4,75 @@
 		"version":"2.0"
 	},
 	"extensionsUsed":[
-		"KHR_texture_transform"
+		"KHR_texture_transform",
+		"KHR_lights_punctual"
 	],
 	"extensionsRequired":[
-		"KHR_texture_transform"
+		"KHR_texture_transform",
+		"KHR_lights_punctual"
 	],
+	"extensions":{
+		"KHR_lights_punctual":{
+			"lights":[
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":434811.3045270581,
+					"spot":{
+						"innerConeAngle":0.1361356884692384,
+						"outerConeAngle":0.5672320127487183
+					},
+					"type":"spot",
+					"name":"Spot.005"
+				},
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":271757.0653294113,
+					"spot":{
+						"innerConeAngle":0.4386594105700681,
+						"outerConeAngle":0.5672320127487183
+					},
+					"type":"spot",
+					"name":"Spot.002"
+				},
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":326108.4783952936,
+					"spot":{
+						"innerConeAngle":0.39269909262657166,
+						"outerConeAngle":0.39269909262657166
+					},
+					"type":"spot",
+					"name":"Spot.003"
+				},
+				{
+					"color":[
+						1,
+						1,
+						1
+					],
+					"intensity":271757.0653294113,
+					"spot":{
+						"innerConeAngle":0.18907736012268117,
+						"outerConeAngle":0.5672320127487183
+					},
+					"type":"spot",
+					"name":"Spot.006"
+				}
+			]
+		}
+	},
 	"scene":0,
 	"scenes":[
 		{
@@ -27,7 +91,10 @@
 				10,
 				11,
 				12,
-				13
+				13,
+				14,
+				15,
+				16
 			]
 		}
 	],
@@ -115,14 +182,6 @@
 			]
 		},
 		{
-			"name":"Empty",
-			"translation":[
-				12.488752365112305,
-				2.8000543117523193,
-				-17.01404571533203
-			]
-		},
-		{
 			"extras":{
 				"physics":"static",
 				"shape":"box"
@@ -199,6 +258,102 @@
 				6.592440605163574,
 				2.3367726802825928,
 				-8.621743202209473
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":0
+				}
+			},
+			"extras":{
+				"range":40.0,
+				"shadow":true,
+				"radius":0.10000000149011612
+			},
+			"name":"Spot.001",
+			"rotation":[
+				-0.7071068286895752,
+				0,
+				0,
+				0.7071068286895752
+			],
+			"translation":[
+				9.705436706542969,
+				16.539535522460938,
+				-7.024075031280518
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":1
+				}
+			},
+			"extras":{
+				"shadow":true,
+				"range":20.0,
+				"radius":0.10000000149011612
+			},
+			"name":"Spot.002",
+			"rotation":[
+				-0.6281778812408447,
+				-0.6281777620315552,
+				0.3246423006057739,
+				0.3246423304080963
+			],
+			"translation":[
+				-14.095357894897461,
+				2.0429441928863525,
+				-0.10483360290527344
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":2
+				}
+			},
+			"extras":{
+				"range":40.0,
+				"shadow":false,
+				"radius":0.10000000149011612
+			},
+			"name":"Spot.003",
+			"rotation":[
+				-0.7071068286895752,
+				0,
+				0,
+				0.7071068286895752
+			],
+			"translation":[
+				-6.980195999145508,
+				16.539535522460938,
+				-7.024075031280518
+			]
+		},
+		{
+			"extensions":{
+				"KHR_lights_punctual":{
+					"light":3
+				}
+			},
+			"extras":{
+				"range":20.0,
+				"shadow":true,
+				"radius":0.10000000149011612
+			},
+			"name":"Spot.004",
+			"rotation":[
+				-0.7071068286895752,
+				0,
+				0,
+				0.7071068286895752
+			],
+			"translation":[
+				12.596728324890137,
+				6.842043876647949,
+				-15.37143325805664
 			]
 		},
 		{

@@ -8,10 +8,10 @@ namespace player {
 	static constexpr f32 EYE_HEIGHT  = 1.6f;
 	static constexpr f32 WALK_SPEED  = 5.0f;
 	static constexpr f32 JUMP_SPEED  = 5.4f;   // ~1.5 m apex
-	static constexpr f32 GRAVITY     = 9.81f;
-	static constexpr f32 GROUND_ACCEL = 25.0f;  // m/s^2, ~0.2 s to full speed
+	static constexpr f32 GRAVITY     = 12.0f;
+	static constexpr f32 GROUND_ACCEL = 40.0f;  // m/s^2, ~0.2 s to full speed
 	static constexpr f32 GROUND_DECEL = 40.0f;  // m/s^2, ~0.125 s to stop
-	static constexpr f32 AIR_ACCEL    = 2.5f;
+	static constexpr f32 AIR_ACCEL    = 5.0f;
 
 	static vec3 move_towards(vec3 from, vec3 to, f32 max_delta) {
 		vec3 d = to - from;

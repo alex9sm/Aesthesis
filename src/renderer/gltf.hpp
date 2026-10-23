@@ -100,10 +100,11 @@ namespace renderer {
 		bool      casts_shadow;
 	};
 
-	// a node tagged with an `entity` custom property (usually an Empty)
+	// a node tagged with an `entity` and/or `model` custom property (an Empty)
 	struct GltfEntity {
 		char  name[64];
-		char  type[32];   // value of the `entity` property
+		char  type[32];     // `entity` property, empty if none
+		char  model[128];   // `model` property: shared model under assets/shared/, empty if none
 		mat4  world_transform;
 		char* extras;     // copy of the node's extras JSON
 	};

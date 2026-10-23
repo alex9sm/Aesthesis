@@ -377,6 +377,22 @@ namespace renderer {
 
 		mat4 world = parent_world * local_mat;
 
+		char type[32] = "";
+		char model_name[128] = "";
+		const char* json = node->extras.data;
+		bool has_type  = json && gltf_extras_value(json, "entity", type, sizeof(type));
+		bool has_model = json && gltf_extras_value(json, "model", model_name, sizeof(model_name));
+		if (has_type || has_model) {
+			GltfEntity& e = model->entities[model->entity_count++];
+			str::copy(e.name, node->name ? node->name : "", sizeof(e.name));
+			str::copy(e.type, type, sizeof(e.type));
+			str::copy(e.model, model_name, sizeof(e.model));
+			e.world_transform = world;
+			e.extras = copy_string(json);
+		}
+		// the subtree under a shared model reference is only its Blender preview
+		if (has_model) return;
+
 		if (node->mesh) {
 			u32 object_index = model->object_count++;
 			model->objects[object_index] = { world, parse_physics(node) };
@@ -419,20 +435,23 @@ namespace renderer {
 
 		if (node->light) model->lights[model->light_count++] = parse_light(node, world);
 
-		char type[32];
-		if (node->extras.data && gltf_extras_value(node->extras.data, "entity", type, sizeof(type))) {
-			GltfEntity& e = model->entities[model->entity_count++];
-			str::copy(e.name, node->name ? node->name : "", sizeof(e.name));
-			str::copy(e.type, type, sizeof(e.type));
-			e.world_transform = world;
-			e.extras = copy_string(node->extras.data);
-		}
-
 		for (cgltf_size i = 0; i < node->children_count; i++) {
 			walk_node(model, node_capacity, data, node->children[i], world,
 				prim_offset_per_mesh, prim_remap, slot_count,
 				mat_index_for_cgltf_mat, mat_keys, mat_count);
 		}
+	}
+
+	static bool has_model_ref(const cgltf_node* node) {
+		char v[128];
+		return node->extras.data && gltf_extras_value(node->extras.data, "model", v, sizeof(v));
+	}
+
+	// meshes reachable without entering a shared model's preview subtree
+	static void mark_used_meshes(const cgltf_data* data, const cgltf_node* node, bool* mesh_used) {
+		if (has_model_ref(node)) return;
+		if (node->mesh) mesh_used[node->mesh - data->meshes] = true;
+		for (cgltf_size i = 0; i < node->children_count; i++) mark_used_meshes(data, node->children[i], mesh_used);
 	}
 
 	bool load_gltf_model(const char* path, GltfModel* out) {
@@ -472,6 +491,23 @@ namespace renderer {
 		memory::set(out->primitives, 0, sizeof(GltfPrimitive) * total_prims);
 		out->primitive_count = 0;
 
+		const cgltf_scene* scene = data->scene ? data->scene
+			: (data->scenes_count > 0 ? &data->scenes[0] : nullptr);
+
+		// only meshes and materials the walked nodes use get converted, so a shared
+		// model's preview copy costs nothing
+		bool* mesh_used     = (bool*)memory::malloc(data->meshes_count + 1);
+		bool* material_used = (bool*)memory::malloc(data->materials_count + 1);
+		memory::set(mesh_used, 0, data->meshes_count + 1);
+		memory::set(material_used, 0, data->materials_count + 1);
+		if (scene) {
+			for (cgltf_size i = 0; i < scene->nodes_count; i++) mark_used_meshes(data, scene->nodes[i], mesh_used);
+		} else {
+			for (cgltf_size i = 0; i < data->nodes_count; i++) {
+				if (!data->nodes[i].parent) mark_used_meshes(data, &data->nodes[i], mesh_used);
+			}
+		}
+
 		// offset table: prim_offset_per_mesh[meshIndex] = first flat slot index.
 		// prim_remap maps each flat slot to its deduped primitive; slots sharing
 		// byte-identical geometry converge on one entry in out->primitives.
@@ -484,6 +520,11 @@ namespace renderer {
 			prim_offset_per_mesh[m] = slot_count;
 			for (cgltf_size p = 0; p < data->meshes[m].primitives_count; p++) {
 				const cgltf_primitive* cp = &data->meshes[m].primitives[p];
+				if (!mesh_used[m]) {
+					prim_remap[slot_count++] = (u32)~0u;
+					continue;
+				}
+				if (cp->material) material_used[cp->material - data->materials] = true;
 
 				// 64-bit content hash; distinct geometry colliding is ~1e-17 here,
 				// and vertex/index counts are folded in, so no byte-compare pass.
@@ -559,6 +600,7 @@ namespace renderer {
 			mat_index_for_cgltf_mat = (u32*)memory::malloc(sizeof(u32) * data->materials_count);
 
 			for (cgltf_size m = 0; m < data->materials_count; m++) {
+				if (!material_used[m]) continue;
 				const cgltf_material* cm = &data->materials[m];
 				GltfMaterial& gm = out->materials[out->material_count];
 				gm.base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -619,7 +661,9 @@ namespace renderer {
 		for (cgltf_size m = 0; m < data->meshes_count; m++) {
 			for (cgltf_size p = 0; p < data->meshes[m].primitives_count; p++) {
 				const cgltf_material* pm = data->meshes[m].primitives[p].material;
-				GltfPrimitive& gp = out->primitives[prim_remap[prim_cursor]];
+				u32 prim_idx = prim_remap[prim_cursor++];
+				if (prim_idx == (u32)~0u) continue;
+				GltfPrimitive& gp = out->primitives[prim_idx];
 				if (pm && gp.material_index == (u32)~0u) {
 					for (u32 mi = 0; mi < out->material_count; mi++) {
 						if (mat_keys[mi] == pm) {
@@ -628,7 +672,6 @@ namespace renderer {
 						}
 					}
 				}
-				prim_cursor++;
 			}
 		}
 
@@ -645,8 +688,6 @@ namespace renderer {
 		out->entities = (GltfEntity*)memory::malloc(sizeof(GltfEntity) * (data->nodes_count > 0 ? data->nodes_count : 1));
 		out->entity_count = 0;
 
-		const cgltf_scene* scene = data->scene ? data->scene
-			: (data->scenes_count > 0 ? &data->scenes[0] : nullptr);
 		if (scene && scene->extras.data) out->scene_extras = copy_string(scene->extras.data);
 
 		mat4 ident = {};
@@ -673,6 +714,8 @@ namespace renderer {
 		memory::free(prim_offset_per_mesh);
 		memory::free(prim_remap);
 		memory::free(prim_hashes);
+		memory::free(mesh_used);
+		memory::free(material_used);
 		memory::free(image_keys);
 		if (mat_keys) memory::free((void*)mat_keys);
 		if (mat_index_for_cgltf_mat) memory::free(mat_index_for_cgltf_mat);

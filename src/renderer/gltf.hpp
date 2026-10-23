@@ -100,6 +100,14 @@ namespace renderer {
 		bool      casts_shadow;
 	};
 
+	// a node tagged with an `entity` custom property (usually an Empty)
+	struct GltfEntity {
+		char  name[64];
+		char  type[32];   // value of the `entity` property
+		mat4  world_transform;
+		char* extras;     // copy of the node's extras JSON
+	};
+
 	struct GltfModel {
 		GltfPrimitive*    primitives;
 		u32               primitive_count;
@@ -113,9 +121,15 @@ namespace renderer {
 		u32               node_count;
 		GltfLight*        lights;
 		u32               light_count;
+		GltfEntity*       entities;
+		u32               entity_count;
+		char*             scene_extras;   // copy of the scene's extras JSON (may be null)
 	};
 
 	bool load_gltf_model(const char* path, GltfModel* out);
 	void free_gltf_model(GltfModel* model);
+
+	// value of a top-level key in a flat extras JSON object, quotes stripped
+	bool gltf_extras_value(const char* json, const char* key, char* out, usize max);
 
 }

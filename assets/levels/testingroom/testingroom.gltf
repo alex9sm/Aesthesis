@@ -1,6 +1,6 @@
 {
 	"asset":{
-		"generator":"Khronos glTF Blender I/O v5.2.40",
+		"generator":"Khronos glTF Blender I/O v5.2.41",
 		"version":"2.0"
 	},
 	"extensionsUsed":[
@@ -76,6 +76,9 @@
 	"scene":0,
 	"scenes":[
 		{
+			"extras":{
+				"environment":"night"
+			},
 			"name":"Scene",
 			"nodes":[
 				0,
@@ -94,7 +97,8 @@
 				13,
 				14,
 				15,
-				16
+				16,
+				17
 			]
 		}
 	],
@@ -179,6 +183,17 @@
 				6.631886959075928,
 				4.211244583129883,
 				-6.137826442718506
+			]
+		},
+		{
+			"extras":{
+				"entity":"player_spawn"
+			},
+			"name":"Empty",
+			"translation":[
+				5.792581558227539,
+				3.882145881652832,
+				-2.053131580352783
 			]
 		},
 		{
@@ -340,7 +355,7 @@
 			},
 			"extras":{
 				"range":20.0,
-				"shadow":true,
+				"shadow":false,
 				"radius":0.10000000149011612
 			},
 			"name":"Spot.004",

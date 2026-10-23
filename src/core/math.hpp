@@ -138,6 +138,19 @@ namespace math {
 		return sin(x) / cos(x);
 	}
 
+	// polynomial on [0, 1] folded to all octants, max error ~1e-5 rad
+	inline f32 atan2(f32 y, f32 x) {
+		f32 ax = abs(x), ay = abs(y);
+		f32 hi = ax > ay ? ax : ay;
+		if (hi == 0.0f) return 0.0f;
+		f32 a = (ax < ay ? ax : ay) / hi;
+		f32 s = a * a;
+		f32 r = ((-0.0464964749f * s + 0.15931422f) * s - 0.327622764f) * s * a + a;
+		if (ay > ax) r = 1.57079633f - r;
+		if (x < 0.0f) r = 3.14159265f - r;
+		return y < 0.0f ? -r : r;
+	}
+
 	inline f32 log2(f32 x) {
 		if (!(x > 0.0f)) return 0.0f;
 

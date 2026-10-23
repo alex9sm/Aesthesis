@@ -14,10 +14,12 @@ struct Player {
 
 namespace player {
 
+	static constexpr f32 EYE_HEIGHT = 1.6f;
+
 	void init(Player* p);
 	void shutdown(Player* p);
 
-	void spawn(Player* p, vec3 eye);
+	void spawn(Player* p, vec3 feet);
 	void input(Player* p);                    // every frame
 	void tick(Player* p, f32 yaw, f32 dt);    // every fixed physics step
 

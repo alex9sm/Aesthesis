@@ -265,12 +265,14 @@ namespace renderer {
 		str::concat(out, uri, out_max);
 	}
 
-	// recursive walk of a cgltf node tree, appending one GltfNode per primitive,
-	// per node-with-mesh. parent_matrix is multiplied into the node's local
-	// transform to produce the world transform.
-	//
-	// value of a top-level key in a flat extras JSON object, quotes stripped
-	static bool extras_value(const char* json, const char* key, char* out, usize max) {
+	static char* copy_string(const char* s) {
+		usize n = str::length(s) + 1;
+		char* out = (char*)memory::malloc(n);
+		memory::copy(out, s, n);
+		return out;
+	}
+
+	bool gltf_extras_value(const char* json, const char* key, char* out, usize max) {
 		char pattern[64];
 		str::format(pattern, sizeof(pattern), "\"%s\"", key);
 		const char* p = str::find(json, pattern);
@@ -298,19 +300,19 @@ namespace renderer {
 
 		const char* name = node->name ? node->name : "<unnamed>";
 		char v[32];
-		if (extras_value(json, "physics", v, sizeof(v))) {
+		if (gltf_extras_value(json, "physics", v, sizeof(v))) {
 			if      (str::equal(v, "static"))  ph.type = PhysicsType::Static;
 			else if (str::equal(v, "dynamic")) ph.type = PhysicsType::Dynamic;
 			else logger::warn("glTF object '%s': unknown physics '%s'", name, v);
 		}
-		if (extras_value(json, "shape", v, sizeof(v))) {
+		if (gltf_extras_value(json, "shape", v, sizeof(v))) {
 			if      (str::equal(v, "box"))    ph.shape = PhysicsShape::Box;
 			else if (str::equal(v, "sphere")) ph.shape = PhysicsShape::Sphere;
 			else if (str::equal(v, "hull"))   ph.shape = PhysicsShape::Hull;
 			else if (str::equal(v, "mesh"))   ph.shape = PhysicsShape::Mesh;
 			else logger::warn("glTF object '%s': unknown shape '%s'", name, v);
 		}
-		if (extras_value(json, "mass", v, sizeof(v))) ph.mass = (f32)atof(v);
+		if (gltf_extras_value(json, "mass", v, sizeof(v))) ph.mass = (f32)atof(v);
 
 		if (ph.type == PhysicsType::Dynamic && node->children_count > 0) {
 			logger::warn("glTF object '%s': children of a dynamic object won't follow it", name);
@@ -340,9 +342,9 @@ namespace renderer {
 		const char* json = node->extras.data;
 		char v[32];
 		if (json) {
-			if (extras_value(json, "range", v, sizeof(v)))  l.range  = (f32)atof(v);
-			if (extras_value(json, "radius", v, sizeof(v))) l.radius = (f32)atof(v);
-			if (extras_value(json, "shadow", v, sizeof(v))) l.casts_shadow = str::equal(v, "true") || str::equal(v, "1");
+			if (gltf_extras_value(json, "range", v, sizeof(v)))  l.range  = (f32)atof(v);
+			if (gltf_extras_value(json, "radius", v, sizeof(v))) l.radius = (f32)atof(v);
+			if (gltf_extras_value(json, "shadow", v, sizeof(v))) l.casts_shadow = str::equal(v, "true") || str::equal(v, "1");
 		}
 		if (l.casts_shadow && l.type == LightType::Point) {
 			logger::warn("glTF light '%s': point lights don't cast shadows", node->name ? node->name : "<unnamed>");
@@ -352,6 +354,8 @@ namespace renderer {
 		return l;
 	}
 
+	// recursive walk of a cgltf node tree, appending one GltfNode per primitive,
+	// per node-with-mesh, plus the node's light and entity.
 	// `prim_offset_per_mesh[i]` gives cgltf mesh i's first slot in the flat
 	// (mesh, primitive) slot space; `prim_remap` maps a slot to the deduped
 	// index in model->primitives.
@@ -414,6 +418,15 @@ namespace renderer {
 		}
 
 		if (node->light) model->lights[model->light_count++] = parse_light(node, world);
+
+		char type[32];
+		if (node->extras.data && gltf_extras_value(node->extras.data, "entity", type, sizeof(type))) {
+			GltfEntity& e = model->entities[model->entity_count++];
+			str::copy(e.name, node->name ? node->name : "", sizeof(e.name));
+			str::copy(e.type, type, sizeof(e.type));
+			e.world_transform = world;
+			e.extras = copy_string(node->extras.data);
+		}
 
 		for (cgltf_size i = 0; i < node->children_count; i++) {
 			walk_node(model, node_capacity, data, node->children[i], world,
@@ -629,9 +642,12 @@ namespace renderer {
 		out->object_count = 0;
 		out->lights = (GltfLight*)memory::malloc(sizeof(GltfLight) * (data->nodes_count > 0 ? data->nodes_count : 1));
 		out->light_count = 0;
+		out->entities = (GltfEntity*)memory::malloc(sizeof(GltfEntity) * (data->nodes_count > 0 ? data->nodes_count : 1));
+		out->entity_count = 0;
 
 		const cgltf_scene* scene = data->scene ? data->scene
 			: (data->scenes_count > 0 ? &data->scenes[0] : nullptr);
+		if (scene && scene->extras.data) out->scene_extras = copy_string(scene->extras.data);
 
 		mat4 ident = {};
 		ident.col[0][0] = 1.0f; ident.col[1][1] = 1.0f;
@@ -661,9 +677,9 @@ namespace renderer {
 		if (mat_keys) memory::free((void*)mat_keys);
 		if (mat_index_for_cgltf_mat) memory::free(mat_index_for_cgltf_mat);
 
-		logger::info("Loaded glTF model '%s' (%u/%u prims after dedup, %u materials, %u textures, %u nodes, %u lights)",
+		logger::info("Loaded glTF model '%s' (%u/%u prims after dedup, %u materials, %u textures, %u nodes, %u lights, %u entities)",
 			path, out->primitive_count, total_prims,
-			out->material_count, out->texture_count, out->node_count, out->light_count);
+			out->material_count, out->texture_count, out->node_count, out->light_count, out->entity_count);
 
 		cgltf_free(data);
 		return true;
@@ -681,6 +697,11 @@ namespace renderer {
 		if (model->objects)   memory::free(model->objects);
 		if (model->nodes)     memory::free(model->nodes);
 		if (model->lights)    memory::free(model->lights);
+		if (model->entities) {
+			for (u32 i = 0; i < model->entity_count; i++) memory::free(model->entities[i].extras);
+			memory::free(model->entities);
+		}
+		if (model->scene_extras) memory::free(model->scene_extras);
 		*model = {};
 	}
 

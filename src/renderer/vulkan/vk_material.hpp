@@ -10,7 +10,7 @@ namespace vk {
 
 	using MaterialHandle = u32;
 	static constexpr MaterialHandle INVALID_MATERIAL = (MaterialHandle)~0u;
-	static constexpr u32 MAX_MATERIALS = 64;
+	static constexpr u32 MAX_MATERIALS = 256;
 
 	// slot 0 is reserved for the engine default material.
 	static constexpr MaterialHandle DEFAULT_MATERIAL = 0;

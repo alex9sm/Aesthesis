@@ -5,7 +5,6 @@ namespace player {
 
 	static constexpr f32 HEIGHT      = 1.8f;
 	static constexpr f32 RADIUS      = 0.4f;
-	static constexpr f32 EYE_HEIGHT  = 1.6f;
 	static constexpr f32 WALK_SPEED  = 5.0f;
 	static constexpr f32 JUMP_SPEED  = 5.4f;   // ~1.5 m apex
 	static constexpr f32 GRAVITY     = 12.0f;
@@ -30,8 +29,7 @@ namespace player {
 		*p = {};
 	}
 
-	void spawn(Player* p, vec3 eye) {
-		vec3 feet = { eye.x, eye.y - EYE_HEIGHT, eye.z };
+	void spawn(Player* p, vec3 feet) {
 		physics::set_character_position(p->character, feet);
 		p->position      = feet;
 		p->prev_position = feet;

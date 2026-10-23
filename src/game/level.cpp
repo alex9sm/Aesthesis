@@ -37,6 +37,11 @@ namespace level {
 
 	static renderer::GltfLight lights[MAX_LEVEL_LIGHTS];
 	static u32                 light_count = 0;
+	static u32                 shadowed[MAX_LEVEL_LIGHTS];   // indices into lights, re-sorted nearest-first each frame
+	static u32                 shadowed_count = 0;
+
+	static renderer::GltfEntity* level_entities     = nullptr;
+	static u32                   level_entity_count = 0;
 
 	static bool has_spawn  = false;
 	static vec3 spawn_feet = {};
@@ -84,8 +89,12 @@ namespace level {
 		renderer::set_sun(NO_SUN_DIR, { 1.0f, 1.0f, 1.0f }, 0.0f);
 		for (u32 i = 0; i < gm.light_count; i++) {
 			const renderer::GltfLight& l = gm.lights[i];
-			if (l.type == renderer::LightType::Sun) renderer::set_sun(-l.direction, l.color, l.intensity);
-			else if (light_count < MAX_LEVEL_LIGHTS) lights[light_count++] = l;
+			if (l.type == renderer::LightType::Sun) {
+				renderer::set_sun(-l.direction, l.color, l.intensity);
+			} else if (light_count < MAX_LEVEL_LIGHTS) {
+				if (l.casts_shadow) shadowed[shadowed_count++] = light_count;
+				lights[light_count++] = l;
+			}
 		}
 
 		char env_name[64];
@@ -106,6 +115,12 @@ namespace level {
 			break;
 		}
 
+		// keep the entities for game code; free_gltf_model skips them once taken
+		level_entities     = gm.entities;
+		level_entity_count = gm.entity_count;
+		gm.entities        = nullptr;
+		gm.entity_count    = 0;
+
 		renderer::free_gltf_model(&gm);
 		return true;
 	}
@@ -115,9 +130,14 @@ namespace level {
 		body_count     = 0;
 		own_body_count = 0;
 		for (u32 i = 0; i < prop_count; i++) assets::release_model(props[i].ref);
-		prop_count  = 0;
-		light_count = 0;
-		has_spawn   = false;
+		prop_count     = 0;
+		light_count    = 0;
+		shadowed_count = 0;
+		has_spawn      = false;
+
+		renderer::free_gltf_entities(level_entities, level_entity_count);
+		level_entities     = nullptr;
+		level_entity_count = 0;
 
 		if (env != renderer::INVALID_CUBEMAP) {
 			renderer::clear_environment_cubemap();
@@ -145,21 +165,34 @@ namespace level {
 		renderer::submit_model(handle, transform, { 1.0f, 1.0f, 1.0f, 1.0f }, overrides, override_count);
 	}
 
-	void submit() {
+	static void submit_light(const renderer::GltfLight& l) {
+		if (l.type == renderer::LightType::Point) {
+			renderer::submit_point_light(l.position, l.color, l.range, l.intensity, l.radius);
+		} else {
+			renderer::submit_spot_light(l.position, l.color, l.range, l.intensity, l.radius,
+				l.direction, l.inner_deg, l.outer_deg, l.casts_shadow);
+		}
+	}
+
+	void submit(vec3 camera_pos) {
 		submit_with_bodies(model, mat4_identity(), 0, own_body_count);
 		for (u32 i = 0; i < prop_count; i++) {
 			const Prop& p = props[i];
 			submit_with_bodies(assets::render_model(p.ref), p.transform, p.first_body, p.body_count);
 		}
 
+		// the renderer gives its spot shadow slots to the first visible shadowed spots submitted,
+		// so submit them nearest-first. insertion sort: last frame's order is nearly sorted
+		for (u32 i = 1; i < shadowed_count; i++) {
+			u32 idx = shadowed[i];
+			f32 d = length_sq(lights[idx].position - camera_pos);
+			u32 j = i;
+			for (; j > 0 && length_sq(lights[shadowed[j - 1]].position - camera_pos) > d; j--) shadowed[j] = shadowed[j - 1];
+			shadowed[j] = idx;
+		}
+		for (u32 i = 0; i < shadowed_count; i++) submit_light(lights[shadowed[i]]);
 		for (u32 i = 0; i < light_count; i++) {
-			const renderer::GltfLight& l = lights[i];
-			if (l.type == renderer::LightType::Point) {
-				renderer::submit_point_light(l.position, l.color, l.range, l.intensity, l.radius);
-			} else {
-				renderer::submit_spot_light(l.position, l.color, l.range, l.intensity, l.radius,
-					l.direction, l.inner_deg, l.outer_deg, l.casts_shadow);
-			}
+			if (!lights[i].casts_shadow) submit_light(lights[i]);
 		}
 	}
 
@@ -168,6 +201,11 @@ namespace level {
 		*feet = spawn_feet;
 		*yaw  = spawn_yaw;
 		return true;
+	}
+
+	const renderer::GltfEntity* entities(u32* count) {
+		*count = level_entity_count;
+		return level_entities;
 	}
 
 }

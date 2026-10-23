@@ -129,6 +129,8 @@ namespace renderer {
 
 	bool load_gltf_model(const char* path, GltfModel* out);
 	void free_gltf_model(GltfModel* model);
+	// for an owner that took GltfModel::entities (nulled in the model) to keep past free_gltf_model
+	void free_gltf_entities(GltfEntity* entities, u32 count);
 
 	// value of a top-level key in a flat extras JSON object, quotes stripped
 	bool gltf_extras_value(const char* json, const char* key, char* out, usize max);

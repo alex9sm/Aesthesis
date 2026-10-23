@@ -728,6 +728,12 @@ namespace renderer {
 		return true;
 	}
 
+	void free_gltf_entities(GltfEntity* entities, u32 count) {
+		if (!entities) return;
+		for (u32 i = 0; i < count; i++) memory::free(entities[i].extras);
+		memory::free(entities);
+	}
+
 	void free_gltf_model(GltfModel* model) {
 		if (model->primitives) {
 			for (u32 i = 0; i < model->primitive_count; i++) {
@@ -740,10 +746,7 @@ namespace renderer {
 		if (model->objects)   memory::free(model->objects);
 		if (model->nodes)     memory::free(model->nodes);
 		if (model->lights)    memory::free(model->lights);
-		if (model->entities) {
-			for (u32 i = 0; i < model->entity_count; i++) memory::free(model->entities[i].extras);
-			memory::free(model->entities);
-		}
+		free_gltf_entities(model->entities, model->entity_count);
 		if (model->scene_extras) memory::free(model->scene_extras);
 		*model = {};
 	}

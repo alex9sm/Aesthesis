@@ -65,6 +65,12 @@ static void draw_hud(f32 dt) {
 }
 
 static void game_update(f32 dt) {
+	// re-read the level and its shared models from disk; the player and camera stay put
+	if (platform::key_pressed(platform::KEY_F5)) {
+		level::unload();
+		level::load(LEVEL_PATH);
+	}
+
 	if (platform::key_pressed(platform::KEY_V)) {
 		g_player_mode = !g_player_mode;
 		if (g_player_mode) player::spawn(&g_player, g_camera.position - vec3{ 0.0f, player::EYE_HEIGHT, 0.0f });
@@ -98,7 +104,7 @@ static void game_update(f32 dt) {
 	mat4 projection = camera::projection(g_camera, aspect);
 
 	renderer::begin_frame(view, projection);
-	level::submit();
+	level::submit(g_camera.position);
 	draw_hud(dt);
 	renderer::end_frame();
 }

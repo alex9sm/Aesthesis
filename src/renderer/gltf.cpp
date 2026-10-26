@@ -544,6 +544,10 @@ namespace renderer {
 					if (gc.times[0] < t0) t0 = gc.times[0];
 					if (gc.times[gc.key_count - 1] > t1) t1 = gc.times[gc.key_count - 1];
 				}
+				for (u32 k = 1; k < gc.key_count; k++) {
+					f32 step = gc.times[k] - gc.times[k - 1];
+					if (step > 0.0f && (clip.frame_time == 0.0f || step < clip.frame_time)) clip.frame_time = step;
+				}
 			}
 
 			// the exporter writes absolute times (frame / fps); clips start at their first key

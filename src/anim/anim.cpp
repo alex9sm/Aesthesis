@@ -22,7 +22,7 @@ namespace anim {
 		for (u32 k = 0; k < skin.joint_count; k++) out[k] = { skin.rest_t[k], skin.rest_r[k], skin.rest_s[k] };
 	}
 
-	void sample(const GltfSkin& skin, const GltfClip& clip, f32 time, JointPose* out) {
+	void sample(const GltfSkin& skin, const GltfClip& clip, f32 time, bool loop, JointPose* out) {
 		rest_pose(skin, out);
 		for (u32 c = 0; c < clip.channel_count; c++) {
 			const GltfChannel& ch = clip.channels[c];
@@ -34,6 +34,11 @@ namespace anim {
 			f32 u = 0.0f;
 			if (time >= ch.times[n - 1]) {
 				a = b = n - 1;
+				if (loop && clip.frame_time > 0.0f && !ch.step) {
+					b = 0;
+					u = (time - ch.times[n - 1]) / clip.frame_time;
+					if (u > 1.0f) u = 1.0f;
+				}
 			} else if (time > ch.times[0]) {
 				u32 lo = 0, hi = n - 1;
 				while (hi - lo > 1) {
@@ -55,23 +60,14 @@ namespace anim {
 		}
 	}
 
-	static f32 advance(f32 t, f32 dt, const GltfClip* clip, bool loop, bool* finished) {
-		f32 d = clip->duration;
-		if (d <= 0.0f) return 0.0f;
-		t += dt;
-		if (loop) return t - math::floor(t / d) * d;
-		if (t < d) return t;
-		if (finished) *finished = true;
-		return d;
-	}
-
-	void play(Player* p, const GltfClip* clip, bool loop, f32 fade_length) {
-		p->prev = nullptr;
+	void play(Player* p, const GltfSkin& skin, const GltfClip* clip, bool loop, f32 fade_length) {
+		p->fade = 0.0f;
+		p->fade_length = 0.0f;
 		if (p->clip && fade_length > 0.0f) {
-			p->prev        = p->clip;
-			p->prev_time   = p->time;
-			p->prev_loop   = p->loop;
-			p->fade        = 0.0f;
+			// `from` may be mid-fade itself, so evaluate into scratch first
+			JointPose now[renderer::MAX_SKIN_JOINTS];
+			evaluate(*p, skin, now);
+			for (u32 k = 0; k < skin.joint_count; k++) p->from[k] = now[k];
 			p->fade_length = fade_length;
 		}
 		p->clip     = clip;
@@ -82,28 +78,31 @@ namespace anim {
 
 	void update(Player* p, f32 dt) {
 		if (!p->clip) return;
-		p->time = advance(p->time, dt, p->clip, p->loop, &p->finished);
-		if (!p->prev) return;
-		p->prev_time = advance(p->prev_time, dt, p->prev, p->prev_loop, nullptr);
-		p->fade += dt;
-		if (p->fade >= p->fade_length) p->prev = nullptr;
+		p->time += dt;
+		if (p->loop) {
+			f32 period = p->clip->duration + p->clip->frame_time;
+			p->time = period > 0.0f ? p->time - math::floor(p->time / period) * period : 0.0f;
+		} else if (p->time >= p->clip->duration) {
+			p->time = p->clip->duration;
+			p->finished = true;
+		}
+		if (p->fade_length > 0.0f) {
+			p->fade += dt;
+			if (p->fade >= p->fade_length) p->fade_length = 0.0f;
+		}
 	}
 
 	void evaluate(const Player& p, const GltfSkin& skin, JointPose* out) {
-		if (!p.clip) {
-			rest_pose(skin, out);
-			return;
-		}
-		sample(skin, *p.clip, p.time, out);
-		if (!p.prev) return;
+		if (!p.clip) rest_pose(skin, out);
+		else sample(skin, *p.clip, p.time, p.loop, out);
+		if (p.fade_length <= 0.0f) return;
 
-		JointPose from[renderer::MAX_SKIN_JOINTS];
-		sample(skin, *p.prev, p.prev_time, from);
 		f32 w = p.fade / p.fade_length;
+		w = w * w * (3.0f - 2.0f * w);   // ease in and out
 		for (u32 k = 0; k < skin.joint_count; k++) {
-			out[k].t = lerp(from[k].t, out[k].t, w);
-			out[k].r = nlerp(from[k].r, out[k].r, w);
-			out[k].s = lerp(from[k].s, out[k].s, w);
+			out[k].t = lerp(p.from[k].t, out[k].t, w);
+			out[k].r = nlerp(p.from[k].r, out[k].r, w);
+			out[k].s = lerp(p.from[k].s, out[k].s, w);
 		}
 	}
 

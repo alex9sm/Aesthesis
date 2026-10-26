@@ -17,6 +17,8 @@ static constexpr f32 KICK_PITCH = 1.2f;
 static constexpr f32 KICK_YAW   = 0.3f;
 static u32 kick_seed = 0x9E3779B9u;
 
+static constexpr f32 WALK_SPEED = 0.5f;   // m/s on the ground before the viewmodel walks
+
 static Camera g_camera = {};
 static Player g_player = {};
 static bool   g_player_mode = false;   // V toggles freecam <-> player
@@ -109,13 +111,20 @@ static void game_update(f32 dt) {
 		renderer::cycle_debug_mode();
 	}
 
-	bool fire = platform::mouse_pressed(platform::MOUSE_LEFT);
-	if (fire) {
+	viewmodel::Input vm = {};
+	vm.fire   = platform::mouse_pressed(platform::MOUSE_LEFT);
+	vm.reload = platform::key_pressed(platform::KEY_R);
+	vm.toggle = platform::key_pressed(platform::KEY_1);
+	if (g_player_mode) {
+		vec3 v = g_player.velocity;
+		vm.walking = physics::character_state(g_player.character).grounded
+			&& v.x * v.x + v.z * v.z > WALK_SPEED * WALK_SPEED;
+	}
+	if (viewmodel::update(dt, vm)) {
 		f32 yaw = KICK_YAW * (2.0f * rand_next(&kick_seed) - 1.0f);
 		camera::add_kick(&g_camera, to_radians(KICK_PITCH), to_radians(yaw));
 	}
 	camera::update_kick(&g_camera, dt);
-	viewmodel::update(dt, fire);
 
 	f32 aspect = (f32)platform::window_width() / (f32)platform::window_height();
 	mat4 view = camera::view(g_camera);

@@ -146,6 +146,7 @@ namespace renderer {
 	struct GltfClip {
 		char         name[64];
 		f32          duration;
+		f32          frame_time;   // key spacing. a loop wraps last key -> first over one frame, as Blender plays a range
 		GltfChannel* channels;
 		u32          channel_count;
 	};

@@ -16,26 +16,26 @@ namespace anim {
 		vec3 s;
 	};
 
-	// one clip playing, optionally fading in over the one before it
+	// one clip playing, fading in from the pose that was showing when it started. freezing
+	// that pose keeps any chain of interruptions pop-free
 	struct Player {
 		const GltfClip* clip;
-		const GltfClip* prev;    // fading out, null when none
 		f32  time;
-		f32  prev_time;
-		f32  fade;               // seconds into the fade
-		f32  fade_length;
 		bool loop;
-		bool prev_loop;
 		bool finished;           // a one-shot reached its end and holds the last frame
+		f32  fade;               // seconds into the fade
+		f32  fade_length;        // 0 when not fading
+		JointPose from[renderer::MAX_SKIN_JOINTS];
 	};
 
-	// restarts `clip` from 0, fading in over whatever was playing
-	void play(Player* p, const GltfClip* clip, bool loop, f32 fade_length = 0.1f);
+	// restarts `clip` from 0, fading in over the current pose
+	void play(Player* p, const GltfSkin& skin, const GltfClip* clip, bool loop, f32 fade_length);
 	void update(Player* p, f32 dt);
 
 	// local pose; joints the clips don't animate keep their rest pose
 	void evaluate(const Player& p, const GltfSkin& skin, JointPose* out);
-	void sample(const GltfSkin& skin, const GltfClip& clip, f32 time, JointPose* out);
+	// a looping sample wraps from the last key back to the first over one frame
+	void sample(const GltfSkin& skin, const GltfClip& clip, f32 time, bool loop, JointPose* out);
 
 	// model-space joint transforms
 	void model_matrices(const GltfSkin& skin, const JointPose* local, mat4* out);

@@ -29,30 +29,39 @@ namespace vk {
 		return INVALID_MESH;
 	}
 
-	// creates the device-local destination and records a staged copy into it on
-	// the open upload batch. the copy completes when that batch is submitted.
-	static bool create_and_stage(const void* src, VkDeviceSize size,
-		VkBufferUsageFlags usage, VkBuffer* out_buffer, VmaAllocation* out_alloc)
-	{
-		VmaAllocator a = allocator();
+	// every stream can be read by the skinning pass, written by it (skinned copies) and cloned
+	static constexpr VkBufferUsageFlags STREAM_USAGE = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+		| VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
+	static bool create_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
+		VkBuffer* out_buffer, VmaAllocation* out_alloc)
+	{
 		VkBufferCreateInfo dst_ci = {};
 		dst_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		dst_ci.size = size;
-		dst_ci.usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		dst_ci.usage = usage | STREAM_USAGE;
 		dst_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 		VmaAllocationCreateInfo dst_alloc_ci = {};
 		dst_alloc_ci.usage = VMA_MEMORY_USAGE_AUTO;
 
-		if (vmaCreateBuffer(a, &dst_ci, &dst_alloc_ci,
+		if (vmaCreateBuffer(allocator(), &dst_ci, &dst_alloc_ci,
 			out_buffer, out_alloc, nullptr) != VK_SUCCESS) {
 			logger::error("vmaCreateBuffer (device) failed");
 			return false;
 		}
+		return true;
+	}
+
+	// creates the device-local destination and records a staged copy into it on
+	// the open upload batch. the copy completes when that batch is submitted.
+	static bool create_and_stage(const void* src, VkDeviceSize size,
+		VkBufferUsageFlags usage, VkBuffer* out_buffer, VmaAllocation* out_alloc)
+	{
+		if (!create_buffer(size, usage, out_buffer, out_alloc)) return false;
 
 		if (!stage_to_buffer(src, size, *out_buffer)) {
-			vmaDestroyBuffer(a, *out_buffer, *out_alloc);
+			vmaDestroyBuffer(allocator(), *out_buffer, *out_alloc);
 			*out_buffer = VK_NULL_HANDLE;
 			*out_alloc = {};
 			return false;
@@ -78,7 +87,9 @@ namespace vk {
 			&& create_and_stage(data.attribs, attr_size,
 				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.attrib_buffer, &m.attrib_alloc)
 			&& create_and_stage(data.indices, ib_size,
-				VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &m.index_buffer, &m.index_alloc);
+				VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &m.index_buffer, &m.index_alloc)
+			&& (!data.skin || create_and_stage(data.skin, sizeof(renderer::SkinVertex) * data.vertex_count,
+				0, &m.skin_buffer, &m.skin_alloc));
 		end_upload();
 
 		if (!ok) {
@@ -93,10 +104,53 @@ namespace vk {
 		return slot;
 	}
 
+	MeshHandle clone_mesh(MeshHandle src_handle) {
+		const MeshGPU* src = get_mesh(src_handle);
+		MeshHandle slot = src ? find_free_slot() : INVALID_MESH;
+		if (slot == INVALID_MESH) {
+			logger::error("clone_mesh: no source or out of mesh slots");
+			return INVALID_MESH;
+		}
+
+		MeshGPU& m = meshes[slot];
+		VkDeviceSize sizes[3] = {
+			sizeof(vec3) * src->vertex_count,
+			sizeof(renderer::VertexAttribs) * src->vertex_count,
+			sizeof(u32) * src->index_count,
+		};
+		bool ok = create_buffer(sizes[0], VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.position_buffer, &m.position_alloc)
+			&& create_buffer(sizes[1], VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &m.attrib_buffer, &m.attrib_alloc)
+			&& create_buffer(sizes[2], VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &m.index_buffer, &m.index_alloc);
+		if (!ok) {
+			destroy_mesh(slot);
+			return INVALID_MESH;
+		}
+
+		VkCommandBuffer cmd = begin_upload();
+		VkBuffer from[3] = { src->position_buffer, src->attrib_buffer, src->index_buffer };
+		VkBuffer to[3]   = { m.position_buffer, m.attrib_buffer, m.index_buffer };
+		for (u32 i = 0; i < 3; i++) {
+			VkBufferCopy region = { 0, 0, sizes[i] };
+			vkCmdCopyBuffer(cmd, from[i], to[i], 1, &region);
+		}
+		end_upload();
+
+		m.vertex_count = src->vertex_count;
+		m.index_count = src->index_count;
+		m.local_aabb = src->local_aabb;
+		return slot;
+	}
+
+	void set_mesh_aabb(MeshHandle handle, const AABB& aabb) {
+		if (handle == INVALID_MESH || handle >= MAX_MESHES) return;
+		meshes[handle].local_aabb = aabb;
+	}
+
 	void destroy_mesh(MeshHandle handle) {
 		if (handle == INVALID_MESH || handle >= MAX_MESHES) return;
 		MeshGPU& m = meshes[handle];
 		VmaAllocator a = allocator();
+		if (m.skin_buffer)     vmaDestroyBuffer(a, m.skin_buffer, m.skin_alloc);
 		if (m.index_buffer)    vmaDestroyBuffer(a, m.index_buffer, m.index_alloc);
 		if (m.attrib_buffer)   vmaDestroyBuffer(a, m.attrib_buffer, m.attrib_alloc);
 		if (m.position_buffer) vmaDestroyBuffer(a, m.position_buffer, m.position_alloc);

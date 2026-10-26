@@ -16,6 +16,7 @@
 #include "vk_draw2d.hpp"
 #include "vk_globals.hpp"
 #include "vk_instance.hpp"
+#include "vk_skinning.hpp"
 #include "vk_lights.hpp"
 #include "vk_texture.hpp"
 #include "vk_cubemap.hpp"
@@ -32,6 +33,7 @@ namespace renderer {
 		MaterialHandle material;
 		mat4           model;
 		vec4           tint;
+		bool           casts_shadow;
 	};
 
 	static PendingDraw draw_queue[vk::MAX_DRAWS_PER_FRAME];
@@ -80,6 +82,18 @@ namespace renderer {
 
 	static ModelInternal models[MAX_MODELS] = {};
 
+	// --- skinned instance slot table ---
+
+	static constexpr u32 MAX_SKINNED = 16;
+
+	struct SkinnedInternal {
+		ModelHandle model;
+		MeshHandle* meshes;   // per model node: its skinned copy, INVALID_MESH for rigid nodes
+		bool        in_use;
+	};
+
+	static SkinnedInternal skinned[MAX_SKINNED] = {};
+
 	// --- font slot table ---
 
 	static constexpr u32 MAX_FONTS = 8;
@@ -126,6 +140,7 @@ namespace renderer {
 	}
 
 	void shutdown() {
+		for (u32 i = 0; i < MAX_SKINNED; i++) destroy_skinned(i);
 		for (u32 i = 0; i < MAX_MODELS; i++) unload_model(i);
 
 		// fonts release their bindless texture slot only — vk::shutdown will
@@ -329,6 +344,41 @@ namespace renderer {
 		mi = {};
 	}
 
+	// --- skinned instances ---
+
+	SkinnedHandle create_skinned(ModelHandle model) {
+		if (model >= MAX_MODELS || !models[model].in_use) return INVALID_SKINNED;
+		SkinnedHandle slot = 0;
+		while (slot < MAX_SKINNED && skinned[slot].in_use) slot++;
+		if (slot == MAX_SKINNED) {
+			logger::error("Out of skinned instance slots");
+			return INVALID_SKINNED;
+		}
+
+		const ModelInternal& mi = models[model];
+		SkinnedInternal& si = skinned[slot];
+		si.model  = model;
+		si.in_use = true;
+		si.meshes = (MeshHandle*)memory::malloc(sizeof(MeshHandle) * (mi.node_count + 1));
+
+		vk::begin_upload();
+		for (u32 i = 0; i < mi.node_count; i++) {
+			const vk::MeshGPU* m = vk::get_mesh(mi.nodes[i].mesh);
+			si.meshes[i] = (m && m->skin_buffer) ? vk::create_skinned_mesh(mi.nodes[i].mesh) : INVALID_MESH;
+		}
+		vk::end_upload();
+		return slot;
+	}
+
+	void destroy_skinned(SkinnedHandle handle) {
+		if (handle >= MAX_SKINNED || !skinned[handle].in_use) return;
+		SkinnedInternal& si = skinned[handle];
+		vk::wait_idle();
+		for (u32 i = 0; i < models[si.model].node_count; i++) vk::destroy_skinned_mesh(si.meshes[i]);
+		memory::free(si.meshes);
+		si = {};
+	}
+
 	// --- lighting ---
 
 	void set_sun(vec3 direction, vec3 color, f32 intensity) {
@@ -440,12 +490,37 @@ namespace renderer {
 	}
 
 	void submit_mesh(MeshHandle mesh, MaterialHandle material,
-		const mat4& model, vec4 tint)
+		const mat4& model, vec4 tint, bool casts_shadow)
 	{
 		if (!frame_active) return;
 		if (draw_count >= vk::MAX_DRAWS_PER_FRAME) return;
 		MaterialHandle m = (material == INVALID_MATERIAL) ? DEFAULT_MATERIAL_HANDLE : material;
-		draw_queue[draw_count++] = { mesh, m, model, tint };
+		draw_queue[draw_count++] = { mesh, m, model, tint, casts_shadow };
+	}
+
+	void submit_skinned(SkinnedHandle handle, const mat4& transform,
+		const mat4* joints, u32 joint_count, const AABB& bounds, bool casts_shadow)
+	{
+		if (!frame_active) return;
+		if (handle >= MAX_SKINNED || !skinned[handle].in_use) return;
+		const SkinnedInternal& si = skinned[handle];
+		const ModelInternal& mi = models[si.model];
+
+		u32 offset = vk::push_joints(joints, joint_count);
+		for (u32 i = 0; i < mi.node_count; i++) {
+			const ModelNode& n = mi.nodes[i];
+			MeshHandle out = si.meshes[i];
+			if (out == INVALID_MESH) {
+				submit_mesh(n.mesh, n.material, transform * n.local_transform, { 1.0f, 1.0f, 1.0f, 1.0f }, casts_shadow);
+				continue;
+			}
+			// joint buffer full: the copy keeps last frame's pose
+			if (offset != UINT32_MAX) {
+				vk::queue_skinning(out, offset);
+				vk::set_mesh_aabb(out, bounds);
+			}
+			submit_mesh(out, n.material, transform, { 1.0f, 1.0f, 1.0f, 1.0f }, casts_shadow);
+		}
 	}
 
 	void submit_model(ModelHandle model, const mat4& transform, vec4 tint,
@@ -543,7 +618,7 @@ namespace renderer {
 			Frustum vf = frustum_from_vp(views[v].view_proj);
 			u32 visible = 0;
 			for (u32 r = 0; r < draw_count; r++) {
-				if (cull_test(vf, draw_queue[r].mesh, draw_queue[r].model)) {
+				if (draw_queue[r].casts_shadow && cull_test(vf, draw_queue[r].mesh, draw_queue[r].model)) {
 					shadow_visible[visible++] = draw_queue[r];
 				}
 			}
@@ -572,6 +647,7 @@ namespace renderer {
 		vk::patch_globals_misc({ (f32)vk::light_count(), vk::environment_intensity(), 0.0f, 0.0f });
 		vk::patch_globals_spot_shadows(frame_spot_vp, spot_shadow_count);
 
+		vk::execute_skinning(cmd);
 		vk::execute_shadow_pass(cmd, sun_on ? views : nullptr);
 		vk::execute_spot_shadow_pass(cmd, views + vk::CASCADE_COUNT, spot_shadow_count);
 		vk::execute_depth_prepass(cmd, batches, batch_count);

@@ -1,0 +1,53 @@
+#version 460
+
+// pre-skins one mesh into its per-instance copy. streams are tightly packed, so they're read as floats:
+// position 3 floats, attribs 9 (normal 3, tangent 4, uv 2), skin 6 (2 uints of u16 joints, 4 weights)
+layout(local_size_x = 64) in;
+
+struct SkinVertex {
+	uint  joints01;
+	uint  joints23;
+	float w0, w1, w2, w3;
+};
+
+layout(std430, set = 0, binding = 0) readonly  buffer SrcPos  { float src_pos[]; };
+layout(std430, set = 0, binding = 1) readonly  buffer SrcAttr { float src_attr[]; };
+layout(std430, set = 0, binding = 2) readonly  buffer Skin    { SkinVertex skin[]; };
+layout(std430, set = 0, binding = 3) writeonly buffer DstPos  { float dst_pos[]; };
+layout(std430, set = 0, binding = 4) writeonly buffer DstAttr { float dst_attr[]; };
+layout(std430, set = 0, binding = 5) readonly  buffer Joints  { mat4 joints[]; };
+
+layout(push_constant) uniform PC {
+	uint vertex_count;
+	uint joint_offset;
+} pc;
+
+void main() {
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= pc.vertex_count) return;
+
+	SkinVertex s = skin[i];
+	uint o = pc.joint_offset;
+	mat4 m = s.w0 * joints[o + (s.joints01 & 0xFFFFu)]
+	       + s.w1 * joints[o + (s.joints01 >> 16)]
+	       + s.w2 * joints[o + (s.joints23 & 0xFFFFu)]
+	       + s.w3 * joints[o + (s.joints23 >> 16)];
+
+	vec3 p = (m * vec4(src_pos[i * 3], src_pos[i * 3 + 1], src_pos[i * 3 + 2], 1.0)).xyz;
+	dst_pos[i * 3]     = p.x;
+	dst_pos[i * 3 + 1] = p.y;
+	dst_pos[i * 3 + 2] = p.z;
+
+	// joints carry rotation and uniform scale only, so mat3(m) is a valid normal transform
+	uint a = i * 9;
+	mat3 r = mat3(m);
+	vec3 n = normalize(r * vec3(src_attr[a], src_attr[a + 1], src_attr[a + 2]));
+	vec3 t = normalize(r * vec3(src_attr[a + 3], src_attr[a + 4], src_attr[a + 5]));
+	// tangent.w and uv are unchanged in the copy
+	dst_attr[a]     = n.x;
+	dst_attr[a + 1] = n.y;
+	dst_attr[a + 2] = n.z;
+	dst_attr[a + 3] = t.x;
+	dst_attr[a + 4] = t.y;
+	dst_attr[a + 5] = t.z;
+}

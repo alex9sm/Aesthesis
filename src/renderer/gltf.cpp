@@ -80,19 +80,55 @@ namespace renderer {
 
 	// identity of a primitive's geometry — everything primitive_to_mesh reads.
 	static u64 primitive_geometry_hash(const cgltf_primitive* prim) {
-		const cgltf_attribute* attrs[4] = {
+		const cgltf_attribute* attrs[6] = {
 			find_attribute(prim, cgltf_attribute_type_position),
 			find_attribute(prim, cgltf_attribute_type_normal),
 			find_attribute(prim, cgltf_attribute_type_tangent),
 			find_attribute_indexed(prim, cgltf_attribute_type_texcoord, 0),
+			find_attribute_indexed(prim, cgltf_attribute_type_joints, 0),
+			find_attribute_indexed(prim, cgltf_attribute_type_weights, 0),
 		};
 		u64 h = 0xcbf29ce484222325ull;
-		for (u32 i = 0; i < 4; i++) h = hash_accessor(attrs[i] ? attrs[i]->data : nullptr, h);
+		for (u32 i = 0; i < 6; i++) h = hash_accessor(attrs[i] ? attrs[i]->data : nullptr, h);
 		return hash_accessor(prim->indices, h);
 	}
 
+	static mat4 to_mat4(const f32* m) {
+		mat4 r = {};
+		for (u32 c = 0; c < 4; c++)
+			for (u32 row = 0; row < 4; row++)
+				r.col[c][row] = m[c * 4 + row];
+		return r;
+	}
+
+	// JOINTS_0 / WEIGHTS_0. joint_remap maps the file's joint order to the skin's parent-first order
+	static SkinVertex* read_skin_stream(const cgltf_primitive* prim, u32 vertex_count,
+		const i32* joint_remap, u32 joint_count)
+	{
+		const cgltf_attribute* j_attr = find_attribute_indexed(prim, cgltf_attribute_type_joints, 0);
+		const cgltf_attribute* w_attr = find_attribute_indexed(prim, cgltf_attribute_type_weights, 0);
+		if (!joint_remap || !j_attr || !w_attr) return nullptr;
+		if (j_attr->data->count != vertex_count || w_attr->data->count != vertex_count) return nullptr;
+
+		SkinVertex* skin = (SkinVertex*)memory::malloc(sizeof(SkinVertex) * vertex_count);
+		for (u32 i = 0; i < vertex_count; i++) {
+			cgltf_uint j[4] = {};
+			f32 w[4] = {};
+			cgltf_accessor_read_uint(j_attr->data, i, j, 4);
+			cgltf_accessor_read_float(w_attr->data, i, w, 4);
+			f32 sum = w[0] + w[1] + w[2] + w[3];
+			for (u32 k = 0; k < 4; k++) {
+				skin[i].joints[k]  = (u16)(j[k] < joint_count ? joint_remap[j[k]] : 0);
+				skin[i].weights[k] = sum > 0.0f ? w[k] / sum : (k == 0 ? 1.0f : 0.0f);
+			}
+		}
+		return skin;
+	}
+
 	// unpack one cgltf_primitive into MeshData. returns false if no positions.
-	static bool primitive_to_mesh(const cgltf_primitive* prim, MeshData* out) {
+	static bool primitive_to_mesh(const cgltf_primitive* prim, MeshData* out,
+		const i32* joint_remap = nullptr, u32 joint_count = 0)
+	{
 		const cgltf_attribute* pos_attr = find_attribute(prim, cgltf_attribute_type_position);
 		const cgltf_attribute* nrm_attr = find_attribute(prim, cgltf_attribute_type_normal);
 		const cgltf_attribute* tan_attr = find_attribute(prim, cgltf_attribute_type_tangent);
@@ -188,6 +224,7 @@ namespace renderer {
 
 		out->positions = positions;
 		out->attribs = attribs;
+		out->skin = read_skin_stream(prim, vertex_count, joint_remap, joint_count);
 		out->vertex_count = vertex_count;
 		out->indices = indices;
 		out->index_count = index_count;
@@ -237,6 +274,7 @@ namespace renderer {
 	void free_mesh_data(MeshData* mesh) {
 		if (mesh->positions) memory::free(mesh->positions);
 		if (mesh->attribs)   memory::free(mesh->attribs);
+		if (mesh->skin)      memory::free(mesh->skin);
 		if (mesh->indices)   memory::free(mesh->indices);
 		*mesh = {};
 	}
@@ -354,6 +392,193 @@ namespace renderer {
 		return l;
 	}
 
+	// --- skin + clips ---
+
+	static mat4 trs_matrix(vec3 t, quat r, vec3 s) {
+		return mat4_translate(t) * quat_to_mat4(r) * mat4_scale(s);
+	}
+
+	// joints are reordered parent-first; new_index[file joint] gives the skin's index
+	static GltfSkin* load_skin(const cgltf_skin* cs, i32* new_index) {
+		u32 n = (u32)cs->joints_count;
+		i32* file_parent = (i32*)memory::malloc(sizeof(i32) * n);
+		u32* file_of_new = (u32*)memory::malloc(sizeof(u32) * n);
+		for (u32 i = 0; i < n; i++) {
+			file_parent[i] = -1;
+			new_index[i] = -1;
+			for (u32 j = 0; j < n; j++) {
+				if (cs->joints[i]->parent == cs->joints[j]) file_parent[i] = (i32)j;
+			}
+		}
+		u32 placed = 0;
+		while (placed < n) {
+			for (u32 i = 0; i < n; i++) {
+				if (new_index[i] >= 0) continue;
+				if (file_parent[i] >= 0 && new_index[file_parent[i]] < 0) continue;
+				new_index[i] = (i32)placed;
+				file_of_new[placed++] = i;
+			}
+		}
+
+		GltfSkin* s = (GltfSkin*)memory::malloc(sizeof(GltfSkin));
+		*s = {};
+		s->joint_count  = n;
+		s->parents      = (i32*)memory::malloc(sizeof(i32) * n);
+		s->inverse_bind = (mat4*)memory::malloc(sizeof(mat4) * n);
+		s->rest_t       = (vec3*)memory::malloc(sizeof(vec3) * n);
+		s->rest_r       = (quat*)memory::malloc(sizeof(quat) * n);
+		s->rest_s       = (vec3*)memory::malloc(sizeof(vec3) * n);
+		s->names        = (char(*)[64])memory::malloc(64 * n);
+
+		for (u32 k = 0; k < n; k++) {
+			u32 i = file_of_new[k];
+			const cgltf_node* jn = cs->joints[i];
+			s->parents[k] = file_parent[i] < 0 ? -1 : new_index[file_parent[i]];
+
+			s->inverse_bind[k] = mat4_identity();
+			if (cs->inverse_bind_matrices) {
+				f32 m[16] = {};
+				cgltf_accessor_read_float(cs->inverse_bind_matrices, i, m, 16);
+				s->inverse_bind[k] = to_mat4(m);
+			}
+
+			if (jn->has_matrix) {
+				mat4_decompose(to_mat4(jn->matrix), &s->rest_t[k], &s->rest_r[k], &s->rest_s[k]);
+			} else {
+				s->rest_t[k] = jn->has_translation ? vec3{ jn->translation[0], jn->translation[1], jn->translation[2] } : vec3{ 0, 0, 0 };
+				s->rest_r[k] = jn->has_rotation ? quat{ jn->rotation[0], jn->rotation[1], jn->rotation[2], jn->rotation[3] } : quat_identity();
+				s->rest_s[k] = jn->has_scale ? vec3{ jn->scale[0], jn->scale[1], jn->scale[2] } : vec3{ 1, 1, 1 };
+			}
+			str::copy(s->names[k], jn->name ? jn->name : "", 64);
+		}
+
+		s->root = mat4_identity();
+		const cgltf_node* above = cs->joints[file_of_new[0]]->parent;
+		if (above) {
+			f32 m[16] = {};
+			cgltf_node_transform_world(above, m);
+			s->root = to_mat4(m);
+		}
+
+		memory::free(file_parent);
+		memory::free(file_of_new);
+		return s;
+	}
+
+	// posed bounds are the joints' box grown by this margin
+	static f32 skin_bounds_margin(const GltfSkin& s, const GltfModel& model) {
+		mat4* bind = (mat4*)memory::malloc(sizeof(mat4) * s.joint_count);
+		vec3* joint_pos = (vec3*)memory::malloc(sizeof(vec3) * s.joint_count);
+		for (u32 k = 0; k < s.joint_count; k++) {
+			mat4 local = trs_matrix(s.rest_t[k], s.rest_r[k], s.rest_s[k]);
+			mat4 global = (s.parents[k] < 0 ? s.root : bind[s.parents[k]]) * local;
+			bind[k] = global;
+			joint_pos[k] = { global.col[3][0], global.col[3][1], global.col[3][2] };
+		}
+		for (u32 k = 0; k < s.joint_count; k++) bind[k] = bind[k] * s.inverse_bind[k];
+
+		f32 margin = 0.0f;
+		for (u32 p = 0; p < model.primitive_count; p++) {
+			const MeshData& m = model.primitives[p].mesh;
+			if (!m.skin) continue;
+			for (u32 v = 0; v < m.vertex_count; v++) {
+				const SkinVertex& sv = m.skin[v];
+				u32 main = 0;
+				for (u32 i = 1; i < 4; i++) if (sv.weights[i] > sv.weights[main]) main = i;
+				u32 j = sv.joints[main];
+				f32 d = length(mat4_transform_point(bind[j], m.positions[v]) - joint_pos[j]);
+				if (d > margin) margin = d;
+			}
+		}
+		memory::free(bind);
+		memory::free(joint_pos);
+		return margin;
+	}
+
+	// one clip per glTF animation (one per Blender action); channels on non-joint nodes are ignored
+	static GltfClip* load_clips(const cgltf_data* data, const cgltf_skin* cs, const i32* new_index) {
+		GltfClip* clips = (GltfClip*)memory::malloc(sizeof(GltfClip) * data->animations_count);
+		static bool warned_cubic = false;
+
+		for (cgltf_size a = 0; a < data->animations_count; a++) {
+			const cgltf_animation* ca = &data->animations[a];
+			GltfClip& clip = clips[a];
+			clip = {};
+			str::copy(clip.name, ca->name ? ca->name : "", sizeof(clip.name));
+			clip.channels = (GltfChannel*)memory::malloc(sizeof(GltfChannel) * (ca->channels_count + 1));
+
+			f32 t0 = 1e30f, t1 = -1e30f;
+			for (cgltf_size c = 0; c < ca->channels_count; c++) {
+				const cgltf_animation_channel* ch = &ca->channels[c];
+				if (ch->target_path != cgltf_animation_path_type_translation
+					&& ch->target_path != cgltf_animation_path_type_rotation
+					&& ch->target_path != cgltf_animation_path_type_scale) continue;
+				i32 joint = -1;
+				for (cgltf_size j = 0; j < cs->joints_count; j++) {
+					if (cs->joints[j] == ch->target_node) { joint = new_index[j]; break; }
+				}
+				if (joint < 0) continue;
+
+				const cgltf_animation_sampler* smp = ch->sampler;
+				bool cubic = smp->interpolation == cgltf_interpolation_type_cubic_spline;
+				if (cubic && !warned_cubic) {
+					logger::warn("glTF clip '%s': CUBICSPLINE played as linear", clip.name);
+					warned_cubic = true;
+				}
+
+				GltfChannel& gc = clip.channels[clip.channel_count++];
+				gc.joint = (u32)joint;
+				gc.path = ch->target_path == cgltf_animation_path_type_translation ? ChannelPath::Translation
+					: ch->target_path == cgltf_animation_path_type_rotation ? ChannelPath::Rotation : ChannelPath::Scale;
+				gc.step = smp->interpolation == cgltf_interpolation_type_step;
+				gc.key_count = (u32)smp->input->count;
+				u32 comps = gc.path == ChannelPath::Rotation ? 4 : 3;
+				gc.times  = (f32*)memory::malloc(sizeof(f32) * gc.key_count);
+				gc.values = (f32*)memory::malloc(sizeof(f32) * comps * gc.key_count);
+				for (u32 k = 0; k < gc.key_count; k++) {
+					cgltf_accessor_read_float(smp->input, k, &gc.times[k], 1);
+					// a cubic key stores in-tangent, value, out-tangent
+					cgltf_accessor_read_float(smp->output, cubic ? k * 3 + 1 : k, &gc.values[k * comps], comps);
+				}
+				if (gc.key_count > 0) {
+					if (gc.times[0] < t0) t0 = gc.times[0];
+					if (gc.times[gc.key_count - 1] > t1) t1 = gc.times[gc.key_count - 1];
+				}
+			}
+
+			// the exporter writes absolute times (frame / fps); clips start at their first key
+			if (t1 < t0) t0 = t1 = 0.0f;
+			for (u32 c = 0; c < clip.channel_count; c++) {
+				for (u32 k = 0; k < clip.channels[c].key_count; k++) clip.channels[c].times[k] -= t0;
+			}
+			clip.duration = t1 - t0;
+		}
+		return clips;
+	}
+
+	void free_gltf_skin(GltfSkin* skin) {
+		if (!skin) return;
+		memory::free(skin->parents);
+		memory::free(skin->inverse_bind);
+		memory::free(skin->rest_t);
+		memory::free(skin->rest_r);
+		memory::free(skin->rest_s);
+		memory::free(skin->names);
+		memory::free(skin);
+	}
+
+	void free_gltf_clips(GltfClip* clips, u32 count) {
+		if (!clips) return;
+		for (u32 i = 0; i < count; i++) {
+			for (u32 c = 0; c < clips[i].channel_count; c++) {
+				memory::free(clips[i].channels[c].times);
+				memory::free(clips[i].channels[c].values);
+			}
+			memory::free(clips[i].channels);
+		}
+		memory::free(clips);
+	}
+
 	// recursive walk of a cgltf node tree, appending one GltfNode per primitive,
 	// per node-with-mesh, plus the node's light and entity.
 	// `prim_offset_per_mesh[i]` gives cgltf mesh i's first slot in the flat
@@ -366,16 +591,10 @@ namespace renderer {
 		const u32* mat_index_for_cgltf_mat,
 		const cgltf_material** mat_keys, u32 mat_count)
 	{
-		// compute local transform via cgltf
+		// cgltf produces a column-major matrix
 		f32 local[16] = {};
 		cgltf_node_transform_local(node, local);
-		// cgltf produces column-major matrix in `local` (cgltf docs).
-		mat4 local_mat = {};
-		for (u32 c = 0; c < 4; c++)
-			for (u32 r = 0; r < 4; r++)
-				local_mat.col[c][r] = local[c * 4 + r];
-
-		mat4 world = parent_world * local_mat;
+		mat4 world = parent_world * to_mat4(local);
 
 		char type[32] = "";
 		char model_name[128] = "";
@@ -395,7 +614,8 @@ namespace renderer {
 
 		if (node->mesh) {
 			u32 object_index = model->object_count++;
-			model->objects[object_index] = { world, parse_physics(node) };
+			// glTF ignores a skinned mesh's own transform: its joints place it
+			model->objects[object_index] = { node->skin ? mat4_identity() : world, parse_physics(node) };
 
 			cgltf_size mesh_index = node->mesh - data->meshes;
 			u32 prim_base = prim_offset_per_mesh[mesh_index];
@@ -508,6 +728,25 @@ namespace renderer {
 			}
 		}
 
+		// one skin per model: every skinned primitive is posed by the first skin
+		i32* joint_remap = nullptr;
+		u32  joint_count = 0;
+		if (data->skins_count > 0) {
+			const cgltf_skin* cs = &data->skins[0];
+			if (data->skins_count > 1) logger::warn("glTF '%s': %u skins, only the first is used", path, (u32)data->skins_count);
+			if (cs->joints_count > MAX_SKIN_JOINTS) {
+				logger::error("glTF '%s': %u joints (max %u), skin ignored", path, (u32)cs->joints_count, MAX_SKIN_JOINTS);
+			} else if (cs->joints_count > 0) {
+				joint_count = (u32)cs->joints_count;
+				joint_remap = (i32*)memory::malloc(sizeof(i32) * joint_count);
+				out->skin = load_skin(cs, joint_remap);
+				if (data->animations_count > 0) {
+					out->clips = load_clips(data, cs, joint_remap);
+					out->clip_count = (u32)data->animations_count;
+				}
+			}
+		}
+
 		// offset table: prim_offset_per_mesh[meshIndex] = first flat slot index.
 		// prim_remap maps each flat slot to its deduped primitive; slots sharing
 		// byte-identical geometry converge on one entry in out->primitives.
@@ -536,7 +775,7 @@ namespace renderer {
 
 				if (unique == (u32)~0u) {
 					GltfPrimitive& gp = out->primitives[out->primitive_count];
-					if (!primitive_to_mesh(cp, &gp.mesh)) {
+					if (!primitive_to_mesh(cp, &gp.mesh, joint_remap, joint_count)) {
 						logger::error("glTF primitive missing POSITION: %s (mesh %u prim %u)",
 							path, (u32)m, (u32)p);
 						gp.mesh = {};
@@ -710,7 +949,10 @@ namespace renderer {
 			}
 		}
 
+		if (out->skin) out->skin->bounds_margin = skin_bounds_margin(*out->skin, *out);
+
 		// --- cleanup temporaries ---
+		if (joint_remap) memory::free(joint_remap);
 		memory::free(prim_offset_per_mesh);
 		memory::free(prim_remap);
 		memory::free(prim_hashes);
@@ -723,6 +965,7 @@ namespace renderer {
 		logger::info("Loaded glTF model '%s' (%u/%u prims after dedup, %u materials, %u textures, %u nodes, %u lights, %u entities)",
 			path, out->primitive_count, total_prims,
 			out->material_count, out->texture_count, out->node_count, out->light_count, out->entity_count);
+		if (out->skin) logger::info("  skin: %u joints, %u clips", out->skin->joint_count, out->clip_count);
 
 		cgltf_free(data);
 		return true;
@@ -748,6 +991,8 @@ namespace renderer {
 		if (model->lights)    memory::free(model->lights);
 		free_gltf_entities(model->entities, model->entity_count);
 		if (model->scene_extras) memory::free(model->scene_extras);
+		free_gltf_skin(model->skin);
+		free_gltf_clips(model->clips, model->clip_count);
 		*model = {};
 	}
 

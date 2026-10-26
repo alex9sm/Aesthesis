@@ -9,6 +9,7 @@
 #include "vk_globals.hpp"
 #include "vk_shadow.hpp"
 #include "vk_instance.hpp"
+#include "vk_skinning.hpp"
 #include "vk_lights.hpp"
 #include "vk_texture.hpp"
 #include "vk_cubemap.hpp"
@@ -229,6 +230,7 @@ namespace vk {
 		if (!init_globals()) return false;
 		if (!init_shadow()) return false;
 		if (!init_instances()) return false;
+		if (!init_skinning()) return false;
 		if (!init_lights()) return false;
 		if (!init_textures()) return false;
 		if (!init_cubemaps()) return false;
@@ -258,6 +260,7 @@ namespace vk {
 			shutdown_materials();
 			shutdown_textures();
 			shutdown_lights();
+			shutdown_skinning();
 			shutdown_instances();
 			shutdown_shadow();
 			shutdown_globals();

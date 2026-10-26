@@ -19,6 +19,9 @@ namespace renderer {
 	using ModelHandle = u32;
 	static constexpr ModelHandle INVALID_MODEL = (ModelHandle)~0u;
 
+	using SkinnedHandle = u32;
+	static constexpr SkinnedHandle INVALID_SKINNED = (SkinnedHandle)~0u;
+
 	using CubemapHandle = u32;
 	static constexpr CubemapHandle INVALID_CUBEMAP = (CubemapHandle)~0u;
 
@@ -78,6 +81,11 @@ namespace renderer {
 		mat4 world;
 	};
 
+	// one animated instance of a skinned model, with its own vertex buffers that the GPU
+	// re-poses every frame. outside begin/end_frame; destroy before unloading the model
+	SkinnedHandle create_skinned(ModelHandle model);
+	void destroy_skinned(SkinnedHandle handle);
+
 	// Loads 6 PNG faces from assets/textures/global/<name>/{px,nx,py,ny,pz,nz}.png
 	CubemapHandle load_cubemap(const char* name, f32 intensity = 1.0f);
 
@@ -100,10 +108,14 @@ namespace renderer {
 	// frame
 	void begin_frame(const mat4& view, const mat4& projection);
 	void submit_mesh(MeshHandle mesh, MaterialHandle material,
-		const mat4& model, vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f });
+		const mat4& model, vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f }, bool casts_shadow = true);
 	void submit_model(ModelHandle model, const mat4& transform = mat4_identity(),
 		vec4 tint = { 1.0f, 1.0f, 1.0f, 1.0f },
 		const ObjectOverride* overrides = nullptr, u32 override_count = 0);
+	// joints: model-space skin matrices (joint transform * inverse bind), one per skin joint.
+	// bounds: model-space box around the posed mesh, for culling
+	void submit_skinned(SkinnedHandle handle, const mat4& transform,
+		const mat4* joints, u32 joint_count, const AABB& bounds, bool casts_shadow = true);
 	void end_frame();
 
 	// fonts — bakes an SDF atlas from a TTF and uploads it as a texture

@@ -20,6 +20,8 @@ namespace vk {
 		VmaAllocation attrib_alloc;
 		VkBuffer index_buffer;
 		VmaAllocation index_alloc;
+		VkBuffer skin_buffer;       // joints/weights stream for the skinning pass, skinned meshes only
+		VmaAllocation skin_alloc;
 		u32 vertex_count;
 		u32 index_count;
 		AABB local_aabb;
@@ -29,8 +31,12 @@ namespace vk {
 	void shutdown_meshes();
 
 	MeshHandle create_mesh(const renderer::MeshData& data);
+	// GPU copy of src's position/attrib/index streams (no skin stream), recorded on the upload batch
+	MeshHandle clone_mesh(MeshHandle src);
 	void destroy_mesh(MeshHandle handle);
 
 	const MeshGPU* get_mesh(MeshHandle handle);
+	// skinned meshes move, so their culling box is refreshed every frame
+	void set_mesh_aabb(MeshHandle handle, const AABB& aabb);
 
 }

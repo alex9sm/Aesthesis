@@ -14,9 +14,16 @@ namespace renderer {
 		vec2 uv;
 	};
 
+	// up to 4 joints (indices into GltfSkin) with weights summing to 1
+	struct SkinVertex {
+		u16 joints[4];
+		f32 weights[4];
+	};
+
 	struct MeshData {
 		vec3*          positions;   // position stream (12 B/vertex)
 		VertexAttribs* attribs;     // normal/tangent/uv stream (36 B/vertex)
+		SkinVertex*    skin;        // skinned meshes only, else null (24 B/vertex)
 		u32 vertex_count;
 		u32* indices;
 		u32 index_count;
@@ -109,6 +116,40 @@ namespace renderer {
 		char* extras;     // copy of the node's extras JSON
 	};
 
+	static constexpr u32 MAX_SKIN_JOINTS = 128;
+
+	// joints are ordered so every parent comes before its children
+	struct GltfSkin {
+		u32   joint_count;
+		i32*  parents;         // -1 for roots
+		mat4* inverse_bind;
+		vec3* rest_t;          // rest-pose local transform
+		quat* rest_r;
+		vec3* rest_s;
+		char  (*names)[64];
+		mat4  root;            // world transform above the root joints (the Blender Armature object)
+		f32   bounds_margin;   // furthest any vertex sits from its main joint, in model space
+	};
+
+	enum class ChannelPath : u8 { Translation, Rotation, Scale };
+
+	struct GltfChannel {
+		u32         joint;
+		ChannelPath path;
+		bool        step;       // STEP interpolation, else LINEAR
+		u32         key_count;
+		f32*        times;      // seconds from the clip's start
+		f32*        values;     // 3 floats per key (4 for rotation, xyzw)
+	};
+
+	// one Blender action
+	struct GltfClip {
+		char         name[64];
+		f32          duration;
+		GltfChannel* channels;
+		u32          channel_count;
+	};
+
 	struct GltfModel {
 		GltfPrimitive*    primitives;
 		u32               primitive_count;
@@ -125,10 +166,16 @@ namespace renderer {
 		GltfEntity*       entities;
 		u32               entity_count;
 		char*             scene_extras;   // copy of the scene's extras JSON (may be null)
+		GltfSkin*         skin;           // first skin, null if none
+		GltfClip*         clips;
+		u32               clip_count;
 	};
 
 	bool load_gltf_model(const char* path, GltfModel* out);
 	void free_gltf_model(GltfModel* model);
+	// for an owner that took GltfModel::skin / clips (nulled in the model)
+	void free_gltf_skin(GltfSkin* skin);
+	void free_gltf_clips(GltfClip* clips, u32 count);
 	// for an owner that took GltfModel::entities (nulled in the model) to keep past free_gltf_model
 	void free_gltf_entities(GltfEntity* entities, u32 count);
 

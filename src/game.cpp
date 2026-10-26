@@ -4,11 +4,13 @@
 #include "level.hpp"
 #include "camera.hpp"
 #include "player.hpp"
+#include "viewmodel.hpp"
 #include "physics.hpp"
 #include "math.hpp"
 #include "string.hpp"
 
-static constexpr const char* LEVEL_PATH = "assets/levels/testingroom/testingroom.gltf";
+static constexpr const char* LEVEL_PATH     = "assets/levels/testingroom/testingroom.gltf";
+static constexpr const char* VIEWMODEL_PATH = "assets/shared/weapons/sidearm/sidearm.gltf";
 
 static Camera g_camera = {};
 static Player g_player = {};
@@ -36,6 +38,7 @@ static void game_init() {
 	player::init(&g_player);
 
 	level::load(LEVEL_PATH);
+	viewmodel::load(VIEWMODEL_PATH);
 	vec3 feet;
 	f32  yaw;
 	if (level::player_spawn(&feet, &yaw)) {
@@ -65,10 +68,12 @@ static void draw_hud(f32 dt) {
 }
 
 static void game_update(f32 dt) {
-	// re-read the level and its shared models from disk; the player and camera stay put
+	// re-read the level, its shared models and the viewmodel from disk; the player and camera stay put
 	if (platform::key_pressed(platform::KEY_F5)) {
+		viewmodel::unload();
 		level::unload();
 		level::load(LEVEL_PATH);
+		viewmodel::load(VIEWMODEL_PATH);
 	}
 
 	if (platform::key_pressed(platform::KEY_V)) {
@@ -99,17 +104,21 @@ static void game_update(f32 dt) {
 		renderer::cycle_debug_mode();
 	}
 
+	viewmodel::update(dt, platform::mouse_pressed(platform::MOUSE_LEFT));
+
 	f32 aspect = (f32)platform::window_width() / (f32)platform::window_height();
 	mat4 view = camera::view(g_camera);
 	mat4 projection = camera::projection(g_camera, aspect);
 
 	renderer::begin_frame(view, projection);
 	level::submit(g_camera.position);
+	viewmodel::submit(view, g_camera.fov_y);
 	draw_hud(dt);
 	renderer::end_frame();
 }
 
 static void game_shutdown() {
+	viewmodel::unload();
 	level::unload();
 	renderer::unload_font(hud_font);
 	player::shutdown(&g_player);

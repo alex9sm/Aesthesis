@@ -10,7 +10,12 @@
 #include "string.hpp"
 
 static constexpr const char* LEVEL_PATH     = "assets/levels/testingroom/testingroom.gltf";
-static constexpr const char* VIEWMODEL_PATH = "assets/shared/weapons/sidearm/sidearm.gltf";
+static constexpr const char* VIEWMODEL      = "weapons/sidearm";
+
+// camera recoil per shot, degrees: pitch up, yaw random within ±. moves to the weapon in V2
+static constexpr f32 KICK_PITCH = 1.2f;
+static constexpr f32 KICK_YAW   = 0.3f;
+static u32 kick_seed = 0x9E3779B9u;
 
 static Camera g_camera = {};
 static Player g_player = {};
@@ -38,7 +43,7 @@ static void game_init() {
 	player::init(&g_player);
 
 	level::load(LEVEL_PATH);
-	viewmodel::load(VIEWMODEL_PATH);
+	viewmodel::load(VIEWMODEL);
 	vec3 feet;
 	f32  yaw;
 	if (level::player_spawn(&feet, &yaw)) {
@@ -73,7 +78,7 @@ static void game_update(f32 dt) {
 		viewmodel::unload();
 		level::unload();
 		level::load(LEVEL_PATH);
-		viewmodel::load(VIEWMODEL_PATH);
+		viewmodel::load(VIEWMODEL);
 	}
 
 	if (platform::key_pressed(platform::KEY_V)) {
@@ -104,7 +109,13 @@ static void game_update(f32 dt) {
 		renderer::cycle_debug_mode();
 	}
 
-	viewmodel::update(dt, platform::mouse_pressed(platform::MOUSE_LEFT));
+	bool fire = platform::mouse_pressed(platform::MOUSE_LEFT);
+	if (fire) {
+		f32 yaw = KICK_YAW * (2.0f * rand_next(&kick_seed) - 1.0f);
+		camera::add_kick(&g_camera, to_radians(KICK_PITCH), to_radians(yaw));
+	}
+	camera::update_kick(&g_camera, dt);
+	viewmodel::update(dt, fire);
 
 	f32 aspect = (f32)platform::window_width() / (f32)platform::window_height();
 	mat4 view = camera::view(g_camera);

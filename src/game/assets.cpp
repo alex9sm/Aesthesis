@@ -12,6 +12,9 @@ namespace assets {
 		u32                   refs;
 		renderer::ModelHandle model;
 		renderer::GltfModel   gltf;   // CPU geometry, kept only when the model has physics
+		renderer::GltfSkin*   skin;   // animated models only
+		renderer::GltfClip*   clips;
+		u32                   clip_count;
 	};
 
 	static SharedModel models[MAX_SHARED_MODELS] = {};
@@ -48,6 +51,12 @@ namespace assets {
 			return INVALID_MODEL_REF;
 		}
 		m.model = renderer::load_model(m.gltf);
+		m.skin = m.gltf.skin;
+		m.clips = m.gltf.clips;
+		m.clip_count = m.gltf.clip_count;
+		m.gltf.skin = nullptr;
+		m.gltf.clips = nullptr;
+		m.gltf.clip_count = 0;
 		if (!has_physics(m.gltf)) renderer::free_gltf_model(&m.gltf);
 		str::copy(m.name, name, sizeof(m.name));
 		m.refs = 1;
@@ -60,11 +69,22 @@ namespace assets {
 		if (--m.refs > 0) return;
 		renderer::unload_model(m.model);
 		renderer::free_gltf_model(&m.gltf);
+		renderer::free_gltf_skin(m.skin);
+		renderer::free_gltf_clips(m.clips, m.clip_count);
 		m = {};
 	}
 
 	renderer::ModelHandle render_model(ModelRef ref) {
 		return ref < MAX_SHARED_MODELS ? models[ref].model : renderer::INVALID_MODEL;
+	}
+
+	const renderer::GltfSkin* skin(ModelRef ref) {
+		return ref < MAX_SHARED_MODELS ? models[ref].skin : nullptr;
+	}
+
+	const renderer::GltfClip* clips(ModelRef ref, u32* count) {
+		*count = ref < MAX_SHARED_MODELS ? models[ref].clip_count : 0;
+		return ref < MAX_SHARED_MODELS ? models[ref].clips : nullptr;
 	}
 
 	u32 create_bodies(ModelRef ref, const mat4& transform, physics::ObjectBody* out, u32 max) {

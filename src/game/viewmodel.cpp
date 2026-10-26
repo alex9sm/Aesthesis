@@ -1,7 +1,7 @@
 #include "viewmodel.hpp"
 #include "anim.hpp"
 #include "api.hpp"
-#include "gltf.hpp"
+#include "assets.hpp"
 #include "log.hpp"
 
 namespace viewmodel {
@@ -16,37 +16,36 @@ namespace viewmodel {
 	static constexpr f32  FIRE_FADE = 0.03f;
 	static constexpr f32  IDLE_FADE = 0.1f;
 
-	static renderer::GltfSkin*     skin       = nullptr;
-	static GltfClip*               clips      = nullptr;
-	static u32                     clip_count = 0;
-	static renderer::ModelHandle   model      = renderer::INVALID_MODEL;
-	static renderer::SkinnedHandle instance   = renderer::INVALID_SKINNED;
-	static const GltfClip*         idle       = nullptr;
-	static const GltfClip*         fire_clip  = nullptr;
-	static anim::Player            player     = {};
+	// idle breathing: the whole viewmodel rises and tips up slightly on each inhale
+	static constexpr f32  BREATH_RATE  = 0.25f;    // breaths per second
+	static constexpr f32  BREATH_LIFT  = 0.002f;   // model units
+	static constexpr f32  BREATH_PITCH = 0.1f;     // degrees
 
-	bool load(const char* path) {
-		renderer::GltfModel gm = {};
-		if (!renderer::load_gltf_model(path, &gm)) return false;
-		if (!gm.skin) {
-			logger::error("viewmodel '%s' has no skin", path);
-			renderer::free_gltf_model(&gm);
+	static assets::ModelRef         ref        = assets::INVALID_MODEL_REF;
+	static const renderer::GltfSkin* skin      = nullptr;
+	static const GltfClip*          clips      = nullptr;
+	static u32                      clip_count = 0;
+	static renderer::SkinnedHandle  instance   = renderer::INVALID_SKINNED;
+	static const GltfClip*          idle       = nullptr;
+	static const GltfClip*          fire_clip  = nullptr;
+	static anim::Player             player     = {};
+	static f32                      breath     = 0.0f;   // seconds into the current breath
+
+	bool load(const char* name) {
+		ref = assets::acquire_model(name);
+		if (ref == assets::INVALID_MODEL_REF) return false;
+		skin = assets::skin(ref);
+		if (!skin) {
+			logger::error("viewmodel '%s' has no skin", name);
+			unload();
 			return false;
 		}
+		clips = assets::clips(ref, &clip_count);
+		instance = renderer::create_skinned(assets::render_model(ref));
 
-		model = renderer::load_model(gm);
-		skin = gm.skin;
-		clips = gm.clips;
-		clip_count = gm.clip_count;
-		gm.skin = nullptr;
-		gm.clips = nullptr;
-		gm.clip_count = 0;
-		renderer::free_gltf_model(&gm);
-
-		instance = renderer::create_skinned(model);
 		idle = anim::find_clip(clips, clip_count, "idle");
 		fire_clip = anim::find_clip(clips, clip_count, "fire");
-		if (!idle || !fire_clip) logger::warn("viewmodel '%s': missing 'idle' or 'fire' clip", path);
+		if (!idle || !fire_clip) logger::warn("viewmodel '%s': missing 'idle' or 'fire' clip", name);
 		player = {};
 		anim::play(&player, idle, true, 0.0f);
 		return true;
@@ -54,13 +53,11 @@ namespace viewmodel {
 
 	void unload() {
 		renderer::destroy_skinned(instance);
-		renderer::unload_model(model);
-		renderer::free_gltf_skin(skin);
-		renderer::free_gltf_clips(clips, clip_count);
+		assets::release_model(ref);
+		ref = assets::INVALID_MODEL_REF;
 		skin = nullptr;
 		clips = nullptr;
 		clip_count = 0;
-		model = renderer::INVALID_MODEL;
 		instance = renderer::INVALID_SKINNED;
 		idle = fire_clip = nullptr;
 		player = {};
@@ -71,6 +68,9 @@ namespace viewmodel {
 		if (fire && fire_clip) anim::play(&player, fire_clip, false, FIRE_FADE);
 		else if (player.finished && player.clip == fire_clip) anim::play(&player, idle, true, IDLE_FADE);
 		anim::update(&player, dt);
+
+		breath += dt;
+		if (breath >= 1.0f / BREATH_RATE) breath -= 1.0f / BREATH_RATE;
 	}
 
 	void submit(const mat4& view, f32 fov_y) {
@@ -83,10 +83,15 @@ namespace viewmodel {
 		anim::skin_matrices(*skin, joints, palette);
 		AABB bounds = anim::bounds(*skin, joints);
 
+		// breathing pivots on the eye, applied once the model faces view forward
+		f32 b = math::sin(TAU * BREATH_RATE * breath);
+		mat4 breathe = mat4_translate({ 0.0f, BREATH_LIFT * b, 0.0f })
+			* mat4_rotate(to_radians(BREATH_PITCH * b), { 1.0f, 0.0f, 0.0f });
+
 		// in view space: x/y scaled by k gives the viewmodel its own FOV, z squashed by DEPTH.
 		// one matrix, so deferred lighting and culling see an ordinary mesh
 		f32 k = DEPTH * math::tan(fov_y * 0.5f) / math::tan(to_radians(FOV_Y) * 0.5f);
-		mat4 local = mat4_rotate(to_radians(YAW), { 0.0f, 1.0f, 0.0f }) * mat4_translate(-EYE);
+		mat4 local = breathe * mat4_rotate(to_radians(YAW), { 0.0f, 1.0f, 0.0f }) * mat4_translate(-EYE);
 		mat4 world = mat4_inverse(view) * mat4_scale(vec3{ k, k, DEPTH }) * local;
 		renderer::submit_skinned(instance, world, palette, skin->joint_count, bounds, false);
 	}

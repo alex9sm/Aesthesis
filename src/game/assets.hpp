@@ -4,6 +4,7 @@
 #include "math.hpp"
 #include "api.hpp"
 #include "physics.hpp"
+#include "gltf.hpp"
 
 // shared models: one copy in memory however many levels/placements/game systems use it
 namespace assets {
@@ -17,6 +18,10 @@ namespace assets {
 	void     release_model(ModelRef ref);
 
 	renderer::ModelHandle render_model(ModelRef ref);
+
+	// skeleton and clips of an animated model (null / 0 if it has none), shared by every instance
+	const renderer::GltfSkin* skin(ModelRef ref);
+	const renderer::GltfClip* clips(ModelRef ref, u32* count);
 
 	// bodies for one placement, from the physics flags in the model's own file
 	u32 create_bodies(ModelRef ref, const mat4& transform, physics::ObjectBody* out, u32 max);

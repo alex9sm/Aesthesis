@@ -16,15 +16,40 @@ namespace camera {
 		c->boost_mult = 4.0f;
 		c->mouse_sens = 0.0025f;
 		c->captured   = false;
+		c->kick       = { 0.0f, 0.0f };
+		c->kick_vel   = { 0.0f, 0.0f };
 	}
 
+	// critically damped: a kick peaks after 1/KICK_OMEGA seconds and is ~gone after 5/KICK_OMEGA
+	static constexpr f32 KICK_OMEGA = 14.0f;
+	static constexpr f32 E          = 2.71828183f;
+
+	// includes the recoil kick, so the view and anything aimed along it agree
 	vec3 forward(const Camera& c) {
-		f32 cp = math::cos(c.pitch);
+		f32 pitch = c.pitch + c.kick.x;
+		if (pitch >  PITCH_LIMIT) pitch =  PITCH_LIMIT;
+		if (pitch < -PITCH_LIMIT) pitch = -PITCH_LIMIT;
+		f32 yaw = c.yaw + c.kick.y;
+		f32 cp = math::cos(pitch);
 		return {
-			-math::sin(c.yaw) * cp,
-			 math::sin(c.pitch),
-			-math::cos(c.yaw) * cp
+			-math::sin(yaw) * cp,
+			 math::sin(pitch),
+			-math::cos(yaw) * cp
 		};
+	}
+
+	void add_kick(Camera* c, f32 pitch, f32 yaw) {
+		// from rest, velocity v peaks at v / (omega * e)
+		c->kick_vel += vec2{ pitch, yaw } * (KICK_OMEGA * E);
+	}
+
+	void update_kick(Camera* c, f32 dt) {
+		// exact step of x'' = -w^2 x - 2w x', frame-rate independent
+		f32 decay = math::exp2(-KICK_OMEGA * dt * 1.44269504f);
+		vec2 x = c->kick, v = c->kick_vel;
+		vec2 a = v + x * KICK_OMEGA;
+		c->kick     = (x + a * dt) * decay;
+		c->kick_vel = (v - a * (KICK_OMEGA * dt)) * decay;
 	}
 
 	vec3 right(const Camera& c) {

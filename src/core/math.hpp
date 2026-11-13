@@ -237,6 +237,13 @@ inline f32  length_sq(vec3 v) { return dot(v, v); }
 inline f32  length(vec3 v) { return math::sqrt(length_sq(v)); }
 inline vec3 normalize(vec3 v) { f32 l = length(v); return { v.x / l, v.y / l, v.z / l }; }
 
+inline vec3 move_towards(vec3 from, vec3 to, f32 max_delta) {
+	vec3 d = to - from;
+	f32 len = length(d);
+	if (len <= max_delta) return to;
+	return from + d * (max_delta / len);
+}
+
 inline vec3 cross(vec3 a, vec3 b) {
     return {
         a.y * b.z - a.z * b.y,
@@ -548,6 +555,8 @@ constexpr f32 TAU = 6.28318530717958647692f;
 
 inline f32 to_radians(f32 degrees) { return degrees * (PI / 180.0f); }
 inline f32 to_degrees(f32 radians) { return radians * (180.0f / PI); }
+// into [-PI, PI)
+inline f32 wrap_angle(f32 radians) { return radians - TAU * math::floor((radians + PI) / TAU); }
 
 struct dvec2 { f64 x, y; };
 
@@ -574,6 +583,17 @@ inline f32 rand_next(u32* seed) {
 	*seed = (*seed >> 16) ^ *seed;
 	*seed = *seed * 2654435769u;
 	return (f32)(*seed & 0x7FFFFFu) / (f32)0x7FFFFFu;
+}
+
+constexpr f32 EULER = 2.71828183f;
+
+// critically damped spring pulling x to 0, stepped exactly so it's frame-rate independent.
+// a velocity impulse v from rest peaks at v / (omega * EULER) after 1/omega s; settles in ~5/omega s
+inline void spring_step(f32* x, f32* v, f32 omega, f32 dt) {
+	f32 decay = math::exp2(-omega * dt * 1.44269504f);
+	f32 a = *v + *x * omega;
+	*x = (*x + a * dt) * decay;
+	*v = (*v - a * (omega * dt)) * decay;
 }
 
 struct AABB {

@@ -2,6 +2,7 @@
 #include "log.hpp"
 #include "api.hpp"
 #include "level.hpp"
+#include "npc.hpp"
 #include "camera.hpp"
 #include "player.hpp"
 #include "viewmodel.hpp"
@@ -45,6 +46,7 @@ static void game_init() {
 	player::init(&g_player);
 
 	level::load(LEVEL_PATH);
+	npc::load();
 	viewmodel::load(VIEWMODEL);
 	vec3 feet;
 	f32  yaw;
@@ -78,8 +80,10 @@ static void game_update(f32 dt) {
 	// re-read the level, its shared models and the viewmodel from disk; the player and camera stay put
 	if (platform::key_pressed(platform::KEY_F5)) {
 		viewmodel::unload();
+		npc::unload();
 		level::unload();
 		level::load(LEVEL_PATH);
+		npc::load();
 		viewmodel::load(VIEWMODEL);
 	}
 
@@ -89,6 +93,8 @@ static void game_update(f32 dt) {
 		camera::set_captured(&g_camera, g_player_mode);
 	}
 
+	f32 prev_pitch = g_camera.pitch;
+	f32 prev_yaw   = g_camera.yaw;
 	if (g_player_mode) {
 		camera::look(&g_camera);
 		player::input(&g_player);
@@ -99,6 +105,7 @@ static void game_update(f32 dt) {
 	physics_accum += dt;
 	for (u32 i = 0; i < MAX_PHYSICS_STEPS && physics_accum >= PHYSICS_DT; i++) {
 		if (g_player_mode) player::tick(&g_player, g_camera.yaw, PHYSICS_DT);
+		npc::tick(PHYSICS_DT);
 		physics::step(PHYSICS_DT);
 		physics_accum -= PHYSICS_DT;
 	}
@@ -115,16 +122,25 @@ static void game_update(f32 dt) {
 	vm.fire   = platform::mouse_pressed(platform::MOUSE_LEFT);
 	vm.reload = platform::key_pressed(platform::KEY_R);
 	vm.toggle = platform::key_pressed(platform::KEY_1);
+	vm.look_delta = { g_camera.pitch - prev_pitch, g_camera.yaw - prev_yaw };
+	vm.grounded = true;
+	f32 ground_speed = 0.0f;
 	if (g_player_mode) {
 		vec3 v = g_player.velocity;
-		vm.walking = physics::character_state(g_player.character).grounded
-			&& v.x * v.x + v.z * v.z > WALK_SPEED * WALK_SPEED;
+		// matches the player: still rising from a jump doesn't count as grounded
+		vm.grounded = physics::character_state(g_player.character).grounded && v.y < 0.1f;
+		vm.vertical_speed = v.y;
+		ground_speed = math::sqrt(v.x * v.x + v.z * v.z);
+		vm.walking = vm.grounded && ground_speed > WALK_SPEED;
 	}
 	if (viewmodel::update(dt, vm)) {
 		f32 yaw = KICK_YAW * (2.0f * rand_next(&kick_seed) - 1.0f);
 		camera::add_kick(&g_camera, to_radians(KICK_PITCH), to_radians(yaw));
 	}
 	camera::update_kick(&g_camera, dt);
+	camera::update_sway(&g_camera, ground_speed, vm.grounded, dt);
+	level::update(dt);
+	npc::update(dt);
 
 	f32 aspect = (f32)platform::window_width() / (f32)platform::window_height();
 	mat4 view = camera::view(g_camera);
@@ -132,6 +148,7 @@ static void game_update(f32 dt) {
 
 	renderer::begin_frame(view, projection);
 	level::submit(g_camera.position);
+	npc::submit(physics_accum / PHYSICS_DT);
 	viewmodel::submit(view, g_camera.fov_y);
 	draw_hud(dt);
 	renderer::end_frame();
@@ -139,6 +156,7 @@ static void game_update(f32 dt) {
 
 static void game_shutdown() {
 	viewmodel::unload();
+	npc::unload();
 	level::unload();
 	renderer::unload_font(hud_font);
 	player::shutdown(&g_player);

@@ -14,6 +14,9 @@ namespace viewmodel {
 		bool reload;    // pressed this frame
 		bool toggle;    // pressed this frame: stow, or draw when stowed
 		bool walking;   // moving on the ground
+		bool grounded;
+		f32  vertical_speed;   // m/s, + up
+		vec2 look_delta;       // (pitch, yaw) radians the mouse turned the view this frame
 	};
 
 	// returns true when a shot fired this frame

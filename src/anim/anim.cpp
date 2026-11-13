@@ -130,6 +130,15 @@ namespace anim {
 		return { lo - m, hi + m };
 	}
 
+	AABB palette(const Player& p, const GltfSkin& skin, mat4* out) {
+		JointPose pose[renderer::MAX_SKIN_JOINTS];
+		mat4 joints[renderer::MAX_SKIN_JOINTS];
+		evaluate(p, skin, pose);
+		model_matrices(skin, pose, joints);
+		skin_matrices(skin, joints, out);
+		return bounds(skin, joints);
+	}
+
 	i32 find_joint(const GltfSkin& skin, const char* name) {
 		for (u32 k = 0; k < skin.joint_count; k++) {
 			if (str::equal(skin.names[k], name)) return (i32)k;

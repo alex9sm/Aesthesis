@@ -43,6 +43,8 @@ namespace anim {
 	void skin_matrices(const GltfSkin& skin, const mat4* model, mat4* out);
 	// model-space bounds of the posed mesh
 	AABB bounds(const GltfSkin& skin, const mat4* model);
+	// evaluate + model_matrices + skin_matrices: the palette for submit_skinned; returns its bounds
+	AABB palette(const Player& p, const GltfSkin& skin, mat4* out);
 
 	i32 find_joint(const GltfSkin& skin, const char* name);
 	const GltfClip* find_clip(const GltfClip* clips, u32 count, const char* name);

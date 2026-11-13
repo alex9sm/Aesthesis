@@ -12,13 +12,6 @@ namespace player {
 	static constexpr f32 GROUND_DECEL = 40.0f;  // m/s^2, ~0.125 s to stop
 	static constexpr f32 AIR_ACCEL    = 5.0f;
 
-	static vec3 move_towards(vec3 from, vec3 to, f32 max_delta) {
-		vec3 d = to - from;
-		f32 len = length(d);
-		if (len <= max_delta) return to;
-		return from + d * (max_delta / len);
-	}
-
 	void init(Player* p) {
 		*p = {};
 		p->character = physics::create_character({ 0.0f, 0.0f, 0.0f }, RADIUS, HEIGHT);

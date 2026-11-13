@@ -9,6 +9,7 @@ namespace level {
 
 	bool load(const char* path);    // outside begin_frame/end_frame
 	void unload();
+	void update(f32 dt);            // advances placed models' clips
 	void submit(vec3 camera_pos);   // between begin_frame/end_frame
 
 	// feet position and facing yaw (camera convention: 0 looks down -Z)

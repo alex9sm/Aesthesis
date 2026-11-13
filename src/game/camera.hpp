@@ -16,6 +16,8 @@ struct Camera {
 	bool captured;   // true while RMB held; mouse delta drives yaw/pitch
 	vec2 kick;       // recoil offset (pitch, yaw) in radians on top of the aim; springs back to 0
 	vec2 kick_vel;
+	f32  sway_phase;  // walk sway: radians through a two-step cycle
+	f32  sway_weight; // 0..1, follows ground speed
 };
 
 namespace camera {
@@ -28,6 +30,9 @@ namespace camera {
 	// recoil: an impulse that peaks at (pitch, yaw) radians, then recovers to the aim
 	void add_kick(Camera* c, f32 pitch, f32 yaw);
 	void update_kick(Camera* c, f32 dt);
+
+	// walk sway, from horizontal speed (m/s); fades out in the air
+	void update_sway(Camera* c, f32 speed, bool grounded, f32 dt);
 
 	mat4 view(const Camera& c);
 	mat4 projection(const Camera& c, f32 aspect);

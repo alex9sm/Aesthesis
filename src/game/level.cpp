@@ -1,4 +1,5 @@
 #include "level.hpp"
+#include "anim.hpp"
 #include "api.hpp"
 #include "assets.hpp"
 #include "gltf.hpp"
@@ -13,6 +14,7 @@ namespace level {
 	static constexpr u32 MAX_LEVEL_BODIES = 1024;
 	static constexpr u32 MAX_LEVEL_LIGHTS = 256;
 	static constexpr u32 MAX_LEVEL_PROPS  = 512;
+	static constexpr u32 MAX_ANIMATED_PROPS = 8;
 	static constexpr vec3 NO_SUN_DIR = { 0.38f, 1.0f, 0.41f };
 
 	// one placement of a shared model
@@ -21,6 +23,14 @@ namespace level {
 		mat4             transform;
 		u32              first_body;
 		u32              body_count;
+		bool             animated;
+	};
+
+	// a placed model with a skin and clips: loops `idle`, or its first clip
+	struct AnimatedProp {
+		u32                     prop;
+		renderer::SkinnedHandle instance;
+		anim::Player            player;
 	};
 
 	static renderer::ModelHandle   model = renderer::INVALID_MODEL;
@@ -34,6 +44,9 @@ namespace level {
 
 	static Prop props[MAX_LEVEL_PROPS];
 	static u32  prop_count = 0;
+
+	static AnimatedProp animated[MAX_ANIMATED_PROPS];
+	static u32          animated_count = 0;
 
 	static renderer::GltfLight lights[MAX_LEVEL_LIGHTS];
 	static u32                 light_count = 0;
@@ -51,6 +64,28 @@ namespace level {
 		char v[32];
 		if (extras && renderer::gltf_extras_value(extras, key, v, sizeof(v))) return (f32)atof(v);
 		return fallback;
+	}
+
+	static bool animate_prop(u32 prop) {
+		assets::ModelRef ref = props[prop].ref;
+		const renderer::GltfSkin* skin = assets::skin(ref);
+		u32 clip_count;
+		const renderer::GltfClip* clips = assets::clips(ref, &clip_count);
+		if (!skin || clip_count == 0) return false;
+		if (animated_count >= MAX_ANIMATED_PROPS) {
+			logger::error("level: animated prop limit reached (%u)", MAX_ANIMATED_PROPS);
+			return false;
+		}
+		renderer::SkinnedHandle instance = renderer::create_skinned(assets::render_model(ref));
+		if (instance == renderer::INVALID_SKINNED) return false;
+
+		const renderer::GltfClip* idle = anim::find_clip(clips, clip_count, "idle");
+		AnimatedProp& a = animated[animated_count++];
+		a = {};
+		a.prop     = prop;
+		a.instance = instance;
+		anim::play(&a.player, *skin, idle ? idle : clips, true, 0.0f);
+		return true;
 	}
 
 	static void place_props(const renderer::GltfModel& gm) {
@@ -71,6 +106,7 @@ namespace level {
 			p.first_body = body_count;
 			p.body_count = assets::create_bodies(ref, e.world_transform, bodies + body_count, MAX_LEVEL_BODIES - body_count);
 			body_count  += p.body_count;
+			p.animated   = animate_prop(prop_count - 1);
 		}
 	}
 
@@ -129,6 +165,8 @@ namespace level {
 		for (u32 i = 0; i < body_count; i++) physics::destroy_body(bodies[i].body);
 		body_count     = 0;
 		own_body_count = 0;
+		for (u32 i = 0; i < animated_count; i++) renderer::destroy_skinned(animated[i].instance);
+		animated_count = 0;
 		for (u32 i = 0; i < prop_count; i++) assets::release_model(props[i].ref);
 		prop_count     = 0;
 		light_count    = 0;
@@ -174,11 +212,24 @@ namespace level {
 		}
 	}
 
+	void update(f32 dt) {
+		for (u32 i = 0; i < animated_count; i++) anim::update(&animated[i].player, dt);
+	}
+
 	void submit(vec3 camera_pos) {
 		submit_with_bodies(model, mat4_identity(), 0, own_body_count);
 		for (u32 i = 0; i < prop_count; i++) {
 			const Prop& p = props[i];
+			if (p.animated) continue;
 			submit_with_bodies(assets::render_model(p.ref), p.transform, p.first_body, p.body_count);
+		}
+		for (u32 i = 0; i < animated_count; i++) {
+			const AnimatedProp& a = animated[i];
+			const Prop& p = props[a.prop];
+			const renderer::GltfSkin& skin = *assets::skin(p.ref);
+			mat4 palette[renderer::MAX_SKIN_JOINTS];
+			AABB bounds = anim::palette(a.player, skin, palette);
+			renderer::submit_skinned(a.instance, p.transform, palette, skin.joint_count, bounds);
 		}
 
 		// the renderer gives its spot shadow slots to the first visible shadowed spots submitted,
